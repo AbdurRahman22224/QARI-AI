@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-500: #10b981;
+  --color-primary-600: #059669;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
+
+/* Quran Tajweed Colors */
+tajweed[class*="madd"] { color: #1692d0; } /* Blue for Madd */
+tajweed[class*="ikhafa"] { color: #d50000; } /* Red for Ikhfa */
+tajweed[class*="ghunnah"] { color: #f57f17; } /* Orange for Ghunnah */
+tajweed[class*="idgham"] { color: #9c27b0; } /* Purple for Idgham */
+tajweed.iqlab { color: #00c853; } /* Green for Iqlab */
+tajweed.qalqalah { color: #00bcd4; } /* Cyan for Qalqalah */
+tajweed.ham_wasl, tajweed.slnt { color: #aaaaaa; } /* Gray for Silent/Wasl */
+span.end { font-size: 0.5em; vertical-align: super; color: #9ca3af; margin: 0 2px; }
