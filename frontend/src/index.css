@@ -1,20 +1,163 @@
 @import "tailwindcss";
 
-@theme {
-  --color-primary-500: #10b981;
-  --color-primary-600: #059669;
+
+@font-face {
+  font-family: 'Uthmanic';
+  src: url('/fonts/KFGQPCHAFS.woff2') format('woff2');
+  font-weight: 400 !important;
+  font-display: swap;
 }
 
 body {
   @apply bg-gray-50 text-gray-900 antialiased;
 }
 
-/* Quran Tajweed Colors */
-tajweed[class*="madd"] { color: #1692d0; } /* Blue for Madd */
-tajweed[class*="ikhafa"] { color: #d50000; } /* Red for Ikhfa */
-tajweed[class*="ghunnah"] { color: #f57f17; } /* Orange for Ghunnah */
-tajweed[class*="idgham"] { color: #9c27b0; } /* Purple for Idgham */
-tajweed.iqlab { color: #00c853; } /* Green for Iqlab */
-tajweed.qalqalah { color: #00bcd4; } /* Cyan for Qalqalah */
-tajweed.ham_wasl, tajweed.slnt { color: #aaaaaa; } /* Gray for Silent/Wasl */
-span.end { font-size: 0.5em; vertical-align: super; color: #9ca3af; margin: 0 2px; }
+@theme {
+  --color-primary-500: #10b981;
+  --color-primary-600: #059669;
+}
+
+.font-arabic,
+.arabic-text {
+  font-family: 'Uthmanic', serif;
+  direction: rtl;
+  unicode-bidi: isolate;
+  letter-spacing: 0;
+  line-height: 1.8;
+}
+
+
+span.end {
+  font-size: 0.5em;
+  vertical-align: super;
+  color: #9ca3af;
+  margin: 0 2px;
+}
+
+/* Tajweed CSS Classes - Strict Production Visibility Stack */
+.taj-silent {
+  color: #9E9E9E;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-madd-2 {
+  color: #F48FB1;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-madd-munfasil {
+  color: #FF9800;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-madd-mottasel {
+  color: #F06292;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-madd-lazim {
+  color: #D32F2F;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-ghunna {
+  color: #4CAF50;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-qalqalah {
+  color: #00BCD4;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-tafkhim {
+  color: #6169da;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-idgham {
+  color: #21c54a;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-iqlab {
+  color: #FDB927;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-lam-shamsiyyah {
+  color: #2196F3;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-lam-qamariyyah {
+  color: #3F51B5;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-default {
+  color: inherit;
+}
+
+/* Translation Superscript (Footnotes) */
+sup {
+  font-size: 0.60em;
+  vertical-align: super;
+  color: #10B981;
+  /* emerald-500 */
+  font-weight: 700;
+  margin-left: 2px;
+  cursor: help;
+}
+
+/* Default fallback */
+.taj-base {
+  display: contents !important;
+  color: #1e293b !important;
+  /* slate-800 */
+  text-shadow: none !important;
+  -webkit-text-fill-color: #1e293b !important;
+}
+
+/* Utility Aliases */
+.taj-wasl {
+  color: #9E9E9E;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-madd {
+  color: #F48FB1;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-madd-6 {
+  color: #D32F2F;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-madd-5 {
+  color: #F06292;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}
+
+.taj-madd-4 {
+  color: #FF9800;
+  text-shadow: 0 0 0 currentColor;
+  -webkit-text-fill-color: currentColor;
+}

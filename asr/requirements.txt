@@ -2,3 +2,6 @@ faster-whisper
 flask
 flask-cors
 python-Levenshtein
+librosa
+numpy
+scikit-learn

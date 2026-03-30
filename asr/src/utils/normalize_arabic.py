@@ -6,8 +6,11 @@ Handles tashkeel removal, letter normalization, and text cleaning.
 import re
 import unicodedata
 
-# Arabic diacritics (tashkeel) Unicode ranges
-TASHKEEL = re.compile(r'[\u0617-\u061A\u064B-\u0652\u0656-\u065F\u0670]')
+# Arabic diacritics (tashkeel) including special Quranic marks
+TASHKEEL = re.compile(r'[\u0610-\u061A\u064B-\u065F\u06D6-\u06DC\u06DF-\u06E8\u06EA-\u06ED\u0670]')
+
+# Waqf (stop) symbols that should not be recited
+WAQF_SYMBOLS = re.compile(r'[ۖۗۘۙۚۛۜ۞]')
 
 # Tatweel (kashida) - decorative elongation
 TATWEEL = '\u0640'
@@ -30,6 +33,11 @@ YAA = '\u064A'            # ي
 def remove_tashkeel(text: str) -> str:
     """Remove all Arabic diacritical marks (tashkeel)."""
     return TASHKEEL.sub('', text)
+
+
+def remove_waqf_symbols(text: str) -> str:
+    """Remove waqf (stop) symbols that are written but not recited."""
+    return WAQF_SYMBOLS.sub('', text)
 
 
 def remove_tatweel(text: str) -> str:
@@ -62,18 +70,14 @@ def clean_whitespace(text: str) -> str:
 def normalize_arabic(text: str) -> str:
     """
     Full Arabic text normalization pipeline.
-    
-    Steps:
-    1. Remove tashkeel (diacritics)
-    2. Remove tatweel (kashida)
-    3. Normalize alef variants
-    4. Normalize taa marbuta
-    5. Normalize alef maqsura
-    6. Clean whitespace
-    
-    Example:
-        بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ → بسم الله الرحمن الرحيم
+    Added unicodedata.normalize('NFKC') for robust character handling.
     """
+    if not text: return ""
+    
+    # 0. Initial Unicode Normalization
+    text = unicodedata.normalize('NFKC', text)
+    
+    text = remove_waqf_symbols(text)
     text = remove_tashkeel(text)
     text = remove_tatweel(text)
     text = normalize_alef(text)
