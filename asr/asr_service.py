@@ -110,6 +110,19 @@ def get_audio_from_url(url: str):
             REFERENCE_CACHE[url] = (None, None)
             return None, None
 
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({
+        "status": "online",
+        "service": "Qari AI ASR",
+        "version": "4.0",
+        "message": "ASR Service is running. Use /analyze for transcription."
+    })
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "healthy"}), 200
+
 @app.route('/api/analyze-reference', methods=['POST'])
 def analyze_reference():
     """
