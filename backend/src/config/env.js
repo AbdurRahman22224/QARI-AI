@@ -1,4 +1,7 @@
-require('dotenv').config({ path: '../../.env' });
+const path = require('path');
+// Load .env from parent (local dev) or current (monorepo deployments) dir
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+require('dotenv').config(); 
 
 const QF_CLIENT_ID = process.env.QF_CLIENT_ID;
 const QF_CLIENT_SECRET = process.env.QF_CLIENT_SECRET;
