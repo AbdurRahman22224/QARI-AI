@@ -21,4 +21,13 @@ app.use('/api/quran', quranRoutes);
 app.use('/api', analysisRoutes); // /analyze, /analyze-reference, /analyze-word-hybrid
 app.use('/api/dashboard', dashboardRoutes); // /stats, /tajweed
 
+// Root Health Check
+app.get('/', (req, res) => {
+  res.json({
+    status: "online",
+    service: "Qari AI Backend",
+    message: "Backend is operational. API routes are under /api"
+  });
+});
+
 module.exports = app;
