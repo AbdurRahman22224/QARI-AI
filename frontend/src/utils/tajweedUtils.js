@@ -14,6 +14,31 @@ const ARABIC_VOWELS = {
   DAGGER_ALIF: '\u0670',
 };
 
+export const RULE_PRINT_NAMES = {
+  'madd_2': 'Normal Madd (2)',
+  'madd_s': 'Separated Madd',
+  'madd_c': 'Connected Madd',
+  'madd_6': 'Necessary Madd (6)',
+  'ghunnah': 'Ghunnah / Nasal',
+  'qalqalah': 'Qalqala (Echo)',
+  'heavy': 'Tafkhim (Heavy)',
+  'idgham': 'Idgham / Ghunnah',
+  'iqlab': 'Iqlab',
+  'lam_shamsiyyah': 'Lam Shamsiyah',
+  'lam_qamariyyah': 'Lam Qamariyah'
+};
+
+export const getReadableRuleName = (ruleKey) => {
+  if (!ruleKey) return '';
+  const key = ruleKey.toLowerCase();
+  if (RULE_PRINT_NAMES[key]) return RULE_PRINT_NAMES[key];
+  
+  return key.replace(/_/g, ' ')
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
 export const TAJWEED_CLASS_MAP = {
   // Silent / Wasl
   'silent': 'taj-silent',
@@ -149,9 +174,7 @@ const isBase = (char) => {
   return (char >= '\u0621' && char <= '\u064A') || // Standard Arabic
          (char >= '\u0671' && char <= '\u06D5') || // Extended Arabic letters
          char === '\u0640' || // Tatweel
-         char === ' ' || 
-         char === '\u06DD' || 
-         (char >= '\u06D6' && char <= '\u06ED');
+         char === ' '; // Space (separator)
 };
 
 /**

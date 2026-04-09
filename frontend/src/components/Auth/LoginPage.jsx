@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { BookOpen, LogIn, Loader2, AlertCircle } from 'lucide-react';
 
-const REDIRECT_URI = 'http://localhost:3000/callback';
+import { API, CALLBACK_URI } from '../../config/api';
 
 export default function LoginPage({ onFallback }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -11,7 +11,7 @@ export default function LoginPage({ onFallback }) {
     setIsLoading(true);
     setError('');
     try {
-      const res = await fetch(`http://localhost:5000/api/auth/login-url?redirect_uri=${encodeURIComponent(REDIRECT_URI)}`);
+      const res = await fetch(`${API.AUTH_LOGIN}?redirect_uri=${encodeURIComponent(CALLBACK_URI)}`);
       const data = await res.json();
       if (data.url) {
         window.location.href = data.url;
@@ -61,8 +61,13 @@ export default function LoginPage({ onFallback }) {
           onClick={onFallback}
           className="w-full flex items-center justify-center px-6 py-3 bg-white text-gray-700 border border-gray-200 rounded-2xl hover:bg-gray-50 transition-colors font-medium"
         >
-          Simulate Hackathon Login
+          Continue as Guest
         </button>
+
+        <p className="mt-4 text-xs text-gray-400 leading-relaxed">
+          <span className="text-amber-500 font-semibold">ⓘ</span> Guest sessions are temporary and stored locally.
+          Login with <span className="font-semibold text-emerald-600">Quran.com</span> to save your progress across devices.
+        </p>
       </div>
     </div>
   );

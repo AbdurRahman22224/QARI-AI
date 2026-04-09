@@ -48,4 +48,19 @@ router.post('/callback', async (req, res) => {
   }
 });
 
+// Upsert user in DB after login
+router.post('/upsert-user', async (req, res) => {
+  const { qf_user_id, name, email } = req.body;
+  if (!qf_user_id) return res.status(400).json({ error: "Missing qf_user_id" });
+
+  try {
+    const { upsertUser } = require('../services/db.service');
+    const user = await upsertUser(qf_user_id, name, email);
+    res.json({ success: true, user });
+  } catch (err) {
+    console.error('[Auth] Upsert user error:', err.message);
+    res.status(500).json({ error: 'Failed to upsert user' });
+  }
+});
+
 module.exports = router;
