@@ -3,7 +3,7 @@ import { Mic, Loader2, AlertCircle, Info, BarChart3, RotateCcw, Volume2, Headpho
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 import { renderTajweed, getLastVowel, splitVerseTajweedIntoWords, generateTajweedMap } from '../../utils/tajweedUtils';
-import { API } from '../../config/api';
+import { API, QURAN_CONTENT_BASE } from '../../config/api';
 
 const pad = (num) => String(num).padStart(3, '0');
 const generateWordAudioUrl = (surah, ayah, position) =>
@@ -17,7 +17,7 @@ const RECITERS = [
   { id: 4, name: "Abu Bakr al-Shatri" },
   { id: 5, name: "Hani ar-Rifai" },
   { id: 9, name: "Mohamed Siddiq al-Minshawi" },
-  { id: 8, name: "Yasser Ad-Dossari" },
+  // { id: 174, name: "Yasser Ad-Dossari" },
   { id: 10, name: "Sa`ud ash-Shuraym" }
 ];
 // Helper to convert English digits to Arabic digits (1 -> ١)
@@ -58,10 +58,10 @@ const AyahOrnament = ({ number }) => {
         dir="ltr"
         className="absolute inset-0 flex items-center justify-center text-white font-bold leading-none"
         style={{
-          fontSize: len === 1 ? '13px' : len === 2 ? '12px' : '11px',
+          fontSize: len === 1 ? '14px' : len === 2 ? '12.5px' : '11px',
           fontFamily: 'Amiri, serif',
           transform: `
-                  translateY(0px)
+                  translateY(${len === 1 ? '-1px' : len === 2 ? '0px' : '0px'})
               translateX(${len === 1 ? '0px' : len === 2 ? '-0.5px' : '0px'})
                 `
         }}
@@ -70,9 +70,7 @@ const AyahOrnament = ({ number }) => {
           {digits.split('').map((digit, i) => (
             <span
               key={`${digit}-${i}`}
-              style={{ marginLeft: len === 2 && i > 0 ? '-1.5px' : len === 3 && i > 0 ? '-0.7px' : '0px'}}
-              // i want to add for the three digit
-
+              style={{ marginLeft: len === 2 && i > 0 ? '-1px' : len === 3 && i > 0 ? '-0.7px' : '0px' }}
             >
               {digit}
             </span>
@@ -95,8 +93,6 @@ const MAKHRAJ_TIPS = {
   'ص': 'Sad: Whistling sound, tip of tongue against lower teeth.',
 };
 
-// Tajweed logic moved to tajweedUtils.js
-
 // Aggressively strip native verse numbers or end-of-ayah symbols (۝)
 const stripAyahMarkers = (text) => {
   if (!text) return '';
@@ -107,29 +103,42 @@ export default function PracticePage() {
   const [chapters, setChapters] = useState([]);
 
   // Initialize state from URL parameters if present
-  const [selectedChapter, setSelectedChapter] = useState(() => {
+  const [navigation, setNavigation] = useState(() => {
+    let s = 1;
+    let a = 1;
     try {
       const params = new URLSearchParams(window.location.search);
-      const s = params.get('surah');
-      if (s) {
-        const n = parseInt(s);
-        if (!isNaN(n) && n >= 1 && n <= 114) return n;
+      const surahParam = params.get('surah');
+      const ayahParam = params.get('ayah');
+
+      if (surahParam) {
+        const n = parseInt(surahParam);
+        if (!isNaN(n) && n >= 1 && n <= 114) s = n;
       }
-    } catch (e) { console.error("URL parsing error:", e); }
-    return 1;
+      if (ayahParam) {
+        const n = parseInt(ayahParam);
+        if (!isNaN(n) && n >= 1) a = n;
+      }
+    } catch (e) {
+      console.error("URL parsing error:", e);
+    }
+    return { chapter: s, ayah: a };
   });
 
-  const [selectedAyah, setSelectedAyah] = useState(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const a = params.get('ayah');
-      if (a) {
-        const n = parseInt(a);
-        if (!isNaN(n) && n >= 1) return n;
-      }
-    } catch (e) { console.error("URL parsing error:", e); }
-    return 1;
-  });
+  const selectedChapter = navigation.chapter;
+  const selectedAyah = navigation.ayah;
+
+  const setSelectedChapter = (chapter) => {
+    setNavigation(prev => ({ ...prev, chapter: typeof chapter === 'function' ? chapter(prev.chapter) : chapter, ayah: 1 }));
+  };
+
+  const setSelectedAyah = (ayah) => {
+    setNavigation(prev => ({ ...prev, ayah: typeof ayah === 'function' ? ayah(prev.ayah) : ayah }));
+  };
+
+  const jumpToVerse = (chapter, ayah) => {
+    setNavigation({ chapter, ayah });
+  };
 
   const [selectedReciter, setSelectedReciter] = useState(7);
   const [verseData, setVerseData] = useState(null);
@@ -375,7 +384,7 @@ export default function PracticePage() {
       const refUrl = resolveAudioUrl(word);
 
       const formData = new FormData();
-      formData.append('audio', blob, 'practice.wav');
+      formData.append('audio', blob, 'practice.webm');
       formData.append('reference_audio_url', refUrl);
       formData.append('word_text', word.text_uthmani);
 
@@ -688,7 +697,7 @@ export default function PracticePage() {
 
   // Fetch Chapters List
   useEffect(() => {
-    fetch('https://api.quran.com/api/v4/chapters?language=en')
+    fetch(API.QURAN(`${QURAN_CONTENT_BASE}/chapters?language=en`))
       .then(res => res.json())
       .then(data => setChapters(data.chapters || []))
       .catch(console.error);
@@ -709,9 +718,9 @@ export default function PracticePage() {
     // If selected ayah exceeds chapter's max verses, cap it
     if (selectedAyah > maxVerses) {
       console.warn(`[Validation] Ayah ${selectedAyah} exceeds Surah ${selectedChapter}'s max (${maxVerses}). Capping to ${maxVerses}.`);
-      setSelectedAyah(maxVerses);
+      setNavigation(prev => ({ ...prev, ayah: maxVerses }));
     }
-  }, [selectedChapter, chapters, selectedAyah]);
+  }, [navigation, chapters]);
 
   // Listen for URL parameter changes and sync state
   useEffect(() => {
@@ -721,25 +730,24 @@ export default function PracticePage() {
         const s = params.get('surah');
         const a = params.get('ayah');
 
+        let nextChapter = 1;
+        let nextAyah = 1;
+
         if (s) {
           const surahNum = parseInt(s);
           if (!isNaN(surahNum) && surahNum >= 1 && surahNum <= 114) {
-            setSelectedChapter(surahNum);
+            nextChapter = surahNum;
           }
         }
         if (a) {
           const ayahNum = parseInt(a);
           if (!isNaN(ayahNum) && ayahNum >= 1) {
-            // Get max verses for this surah if available
-            const surahNum = parseInt(s) || selectedChapter;
-            const chapter = chapters.find(ch => ch.id === surahNum);
-            const maxVerses = chapter?.verses_count || ayahNum;
-
-            // Cap ayah to max verses
-            const validAyah = Math.min(ayahNum, maxVerses);
-            setSelectedAyah(validAyah);
+            const chapter = chapters.find(ch => ch.id === nextChapter);
+            const maxVerses = chapter?.verses_count || 1000; // allow high if chapters not loaded
+            nextAyah = Math.min(ayahNum, maxVerses);
           }
         }
+        setNavigation({ chapter: nextChapter, ayah: nextAyah });
       } catch (e) { console.error("URL sync error:", e); }
     };
 
@@ -758,9 +766,10 @@ export default function PracticePage() {
 
   // Only reset Ayah when Chapter ACTUALLY changes (detected via ref comparison)
   useEffect(() => {
+    // Only reset Ayah when Chapter ACTUALLY changes
     if (prevChapterRef.current !== selectedChapter) {
       prevChapterRef.current = selectedChapter;
-      setSelectedAyah(1);
+      setNavigation(prev => ({ ...prev, ayah: 1 }));
       setIsAutoPlayEnabled(false);
     }
   }, [selectedChapter]);
@@ -780,7 +789,7 @@ export default function PracticePage() {
     if (!selectedChapter) return;
     setIsLoading(true);
 
-    fetch(`https://api.quran.com/api/v4/verses/by_chapter/${selectedChapter}?language=en&words=true&translations=20&audio=${selectedReciter}&per_page=1&page=${selectedAyah}&fields=text_uthmani_tajweed,text_uthmani&word_fields=text_uthmani,text_uthmani_tajweed,audio_url,char_type_name,position&segments=true&foot_notes=true`)
+    fetch(API.QURAN(`${QURAN_CONTENT_BASE}/verses/by_chapter/${selectedChapter}?language=en&words=true&translations=20&audio=${selectedReciter}&per_page=1&page=${selectedAyah}&fields=text_uthmani_tajweed,text_uthmani&word_fields=text_uthmani,text_uthmani_tajweed,audio_url,char_type_name,position&segments=true&foot_notes=true`))
       .then(res => res.json())
       .then(data => {
         if (data.verses && data.verses.length > 0) {
@@ -853,6 +862,25 @@ export default function PracticePage() {
 
           setVerseData({ ...data.verses[0], words: sanitized });
 
+          // 🕒 New: Specifically fetch recitation metadata from the protected API as per requirement
+          const ayahKey = `${selectedChapter}:${selectedAyah}`;
+          fetch(API.QURAN(`${QURAN_CONTENT_BASE}/recitations/${selectedReciter}/by_ayah/${ayahKey}`))
+            .then(res => res.json())
+            .then(recData => {
+              if (recData.audio_files && recData.audio_files.length > 0) {
+                const audioUrl = recData.audio_files[0].url;
+                setVerseData(prev => ({
+                  ...prev,
+                  audio: {
+                    ...prev?.audio,
+                    url: audioUrl
+                  }
+                }));
+                console.log(`[Proxy] Authenticated recitation metadata loaded for ${ayahKey}`);
+              }
+            })
+            .catch(err => console.error("[Proxy] Recitation fetch failed:", err));
+
           // 🕒 Phase 1: Try to get duration from API segments (Instantly available!)
           if (data.verses[0].audio?.segments?.length > 0) {
             const segments = data.verses[0].audio.segments;
@@ -920,44 +948,6 @@ export default function PracticePage() {
 
   }, [selectedChapter, selectedAyah, selectedReciter]);
 
-  // 🔗 Keep URL in sync with state - update URL when chapter/ayah changes
-  useEffect(() => {
-    if (selectedChapter && selectedAyah) {
-      const newUrl = `/practice?surah=${selectedChapter}&ayah=${selectedAyah}`;
-      window.history.replaceState(null, '', newUrl);
-    }
-  }, [selectedChapter, selectedAyah]);
-
-  // 🔗 Listen for URL changes (back/forward buttons or manual URL edit)
-  useEffect(() => {
-    const handlePopState = () => {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const urlSurah = params.get('surah');
-        const urlAyah = params.get('ayah');
-
-        if (urlSurah) {
-          const surahNum = parseInt(urlSurah);
-          if (!isNaN(surahNum) && surahNum >= 1 && surahNum <= 114) {
-            setSelectedChapter(surahNum);
-          }
-        }
-
-        if (urlAyah) {
-          const ayahNum = parseInt(urlAyah);
-          if (!isNaN(ayahNum) && ayahNum >= 1) {
-            setSelectedAyah(ayahNum);
-          }
-        }
-      } catch (e) {
-        console.error('URL sync error:', e);
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
   const currentChapterNode = chapters.find(c => c.id === parseInt(selectedChapter));
   const totalAyahs = currentChapterNode?.verses_count || 1;
 
@@ -979,10 +969,12 @@ export default function PracticePage() {
     // Base CDN can be verses.quran.com or audio.qurancdn.com
     let audioUrl = verseData.audio.url;
     if (!audioUrl.startsWith('http')) {
-      audioUrl = `https://verses.quran.com/${audioUrl}`;
+      // The protected API returns relative paths. 
+      // Most recitations are hosted on verses.quran.com or audio.qurancdn.com
+      audioUrl = `https://verses.quran.foundation/${audioUrl}`;
     }
 
-    console.log("Playing Reference audio from:", audioUrl);
+    console.log("🔊 Playing Reference Recitation from:", audioUrl);
 
     if (!audioRef.current || audioRef.current.src !== audioUrl) {
       if (audioRef.current) audioRef.current.pause();
@@ -992,12 +984,21 @@ export default function PracticePage() {
         setIsPlaying(false);
         // Read live refs — never use stale closure values
         if (isAutoPlayEnabledRef.current && !analysisResultRef.current) {
-          // Only advance if auto-play is on AND no report is visible
-          setSelectedAyah(prev => {
-            const cur = Number(prev);
-            return cur < totalAyahs ? cur + 1 : cur;
+          // Advance to the next verse safely, crossing Surah boundaries if needed
+          setNavigation(prev => {
+            const currentObj = chapters.find(c => c.id === prev.chapter);
+            const maxAyahs = currentObj ? currentObj.verses_count : 1;
+
+            if (prev.ayah < maxAyahs) {
+              return { ...prev, ayah: Number(prev.ayah) + 1 };
+            } else if (prev.chapter < 114) {
+              return { chapter: prev.chapter + 1, ayah: 1 };
+            } else {
+              // Reached end of Quran
+              setTimeout(() => setIsAutoPlayEnabled(false), 0);
+              return prev;
+            }
           });
-          if (Number(selectedAyah) >= totalAyahs) setIsAutoPlayEnabled(false);
         } else {
           setIsAutoPlayEnabled(false);
         }
@@ -1034,21 +1035,19 @@ export default function PracticePage() {
     if (!currentChapter) return;
 
     if (selectedAyah < currentChapter.verses_count) {
-      setSelectedAyah(prev => Number(prev) + 1);
+      setNavigation(prev => ({ ...prev, ayah: Number(prev.ayah) + 1 }));
     } else if (selectedChapter < 114) {
-      setSelectedChapter(prev => prev + 1);
-      setSelectedAyah(1);
+      setNavigation({ chapter: selectedChapter + 1, ayah: 1 });
     }
   };
 
   const handlePrevAyah = () => {
     if (selectedAyah > 1) {
-      setSelectedAyah(prev => Number(prev) - 1);
+      setNavigation(prev => ({ ...prev, ayah: Number(prev.ayah) - 1 }));
     } else if (selectedChapter > 1) {
       const prevChapter = chapters.find(c => c.id === selectedChapter - 1);
       if (prevChapter) {
-        setSelectedChapter(prev => prev - 1);
-        setSelectedAyah(prevChapter.verses_count);
+        setNavigation({ chapter: selectedChapter - 1, ayah: prevChapter.verses_count });
       }
     }
   };
@@ -1274,7 +1273,9 @@ export default function PracticePage() {
                 <div className="flex flex-col items-start leading-none">
                   <span className="text-[8px] font-black text-emerald-600 uppercase tracking-[0.14em] mb-0.5">Current Verse</span>
                   <span className="text-[10px] font-black text-slate-800">
-                    {chapters.find(c => c.id === selectedChapter)?.name_simple || 'Loading...'} : {selectedAyah}
+                    {chapters.length > 0
+                      ? (chapters.find(c => c.id === selectedChapter)?.name_simple || `Surah ${selectedChapter}`)
+                      : (isLoading ? 'Surah Loading...' : `Surah ${selectedChapter}`)} : {selectedAyah}
                   </span>
                 </div>
               </button>
@@ -1332,20 +1333,20 @@ export default function PracticePage() {
                     <Info size={14} />
                   </button>
                   <div className="absolute left-0 top-full mt-1 w-[210px] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-100 p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-[60] pointer-events-none group-hover:pointer-events-auto">
-                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-2">Tajweed Legend</p>
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-2">Tajweed Colors</p>
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#9E9E9E]"></span><span className="text-[10px] font-semibold text-gray-600">Silent Letter</span></div>
                       <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#F48FB1]"></span><span className="text-[10px] font-semibold text-gray-600">Normal Madd (2)</span></div>
-                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#FF9800]"></span><span className="text-[10px] font-semibold text-gray-600">Separated Madd</span></div>
-                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#F06292]"></span><span className="text-[10px] font-semibold text-gray-600">Connected Madd</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#FF9800]"></span><span className="text-[10px] font-semibold text-gray-600">Separated Madd (2/4/6)</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#F06292]"></span><span className="text-[10px] font-semibold text-gray-600">Connected Madd (4,5)</span></div>
                       <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#D32F2F]"></span><span className="text-[10px] font-semibold text-gray-600">Necessary Madd (6)</span></div>
-                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#4CAF50]"></span><span className="text-[10px] font-semibold text-gray-600">Ghunnah/Nasal</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#4CAF50]"></span><span className="text-[10px] font-semibold text-gray-600">Ghunna/ikhfa’</span></div>
                       <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#00BCD4]"></span><span className="text-[10px] font-semibold text-gray-600">Qalqala (Echo)</span></div>
                       <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#6169da]"></span><span className="text-[10px] font-semibold text-gray-600">Tafkhim (Heavy)</span></div>
                       <div className="border-t border-gray-100 mt-1.5 pt-1.5">
                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter mb-1.5">Extended</p>
                         <div className="grid grid-cols-1 gap-1.5">
-                          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#21c54a]"></span><span className="text-[9px] font-medium text-gray-500">Idgham / Ghunnah</span></div>
+                          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#21c54a]"></span><span className="text-[9px] font-medium text-gray-500">Idgham</span></div>
                           <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#FDB927]"></span><span className="text-[9px] font-medium text-gray-500">Iqlab</span></div>
                           <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#2196F3]"></span><span className="text-[9px] font-medium text-gray-500">Lam Shamsiyah</span></div>
                           <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#3F51B5]"></span><span className="text-[9px] font-medium text-gray-500">Lam Qamariyah</span></div>
@@ -1357,7 +1358,7 @@ export default function PracticePage() {
 
                 <div className={`w-full flex flex-col items-center p-3 sm:p-4 rounded-2xl transition-all duration-700 ${isRecording ? 'bg-rose-50/30' : ''}`}>
                   <h2
-                    className={`text-[1.2rem] sm:text-[1.6rem] font-arabic drop-shadow-sm leading-[1.95] sm:leading-[1.7] text-center flex flex-wrap justify-center gap-x-2 gap-y-2 sm:gap-y-2.5 transition-all duration-700 ${isPlaying ? 'text-emerald-700' : 'text-slate-800'}`}
+                    className={`text-[1.4rem] sm:text-[1.8rem] font-arabic drop-shadow-sm leading-[1.95] sm:leading-[1.7] text-center flex flex-wrap justify-center gap-x-2 gap-y-2 sm:gap-y-2.5 transition-all duration-700 ${isPlaying ? 'text-emerald-700' : 'text-slate-800'}`}
                     style={{ fontWeight: 550 }}
                     dir="rtl"
                   >
@@ -1457,8 +1458,7 @@ export default function PracticePage() {
                     )}
                     <button
                       onClick={togglePlay}
-                      disabled={isAnalyzing}
-                      className={`h-8 w-full max-w-[10rem] flex items-center justify-center gap-1.5 px-3 rounded-lg hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-black text-[9px] uppercase tracking-[0.11em] mx-auto ${isPlaying ? 'bg-amber-50 text-amber-700' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'} ${isAnalyzing ? 'opacity-40 cursor-not-allowed disabled:hover:scale-100' : ''}`}
+                      className={`h-8 w-full max-w-[10rem] flex items-center justify-center gap-1.5 px-3 rounded-lg hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-black text-[9px] uppercase tracking-[0.11em] mx-auto ${isPlaying ? 'bg-amber-50 text-amber-700' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}
                     >
                       <Volume2 size={12} />
                       {isPlaying ? '⏸ Pause Reference' : '▶ Listen Reference'}
@@ -1580,7 +1580,7 @@ export default function PracticePage() {
 
                   {/* ── Feedback List ── */}
                   {analysisResult.feedback && analysisResult.feedback.length > 0 && (
-                    <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-4">
+                    <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-3.5">
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Detailed Feedback</p>
                       <div className="space-y-2">
                         {analysisResult.feedback.map((f, i) => (
@@ -1600,49 +1600,49 @@ export default function PracticePage() {
 
                   {/* ── Suggestions ── */}
                   {analysisResult.suggestions && analysisResult.suggestions.length > 0 && (
-                    <div className="bg-gray-50 rounded-2xl border border-gray-200 p-4">
-                      <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-2">💡 Suggestions</p>
+                    <div className="bg-gray-50 rounded-xl border border-gray-200 p-3.5">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">💡 Suggestions</p>
                       {analysisResult.suggestions.map((s, i) => (
-                        <p key={i} className="text-gray-600 text-sm font-medium leading-relaxed">• {s}</p>
+                        <p key={i} className="text-gray-600 text-xs font-medium leading-relaxed">• {s}</p>
                       ))}
                     </div>
                   )}
 
                   {/* ── Audio Waveform Visualizer ── */}
-                  <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-4">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Waveform Analysis</p>
-                    <div ref={waveformRef} className="w-full rounded-xl overflow-hidden bg-gray-50 border border-gray-100 mb-3 relative">
+                  <div className="bg-white rounded-xl shadow-md border border-gray-100 p-3.5">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Waveform Analysis</p>
+                    <div ref={waveformRef} className="w-full rounded-lg overflow-hidden bg-gray-50 border border-gray-100 mb-2.5 relative">
                       {/* WaveSurfer mounts here */}
                     </div>
 
                     {/* What We Heard text underneath */}
-                    <div className="pt-2 border-t border-gray-100 mt-2">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Raw Output</p>
+                    <div className="pt-1.5 border-t border-gray-100 mt-1.5">
+                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Raw Output</p>
                       <p className="text-gray-700 font-medium text-xs" dir="rtl">{analysisResult.raw_text || '(no speech detected)'}</p>
                     </div>
                   </div>
 
                   {/* ── Audio Controls ── */}
-                  <div className="flex gap-2.5 justify-center w-full mt-3">
+                  <div className="flex gap-2 justify-center w-full mt-2.5">
                     <button
                       onClick={isPlayingRecording ? pauseRecording : playRecording}
-                      className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-xs"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px]"
                     >
-                      <Volume2 size={14} />
+                      <Volume2 size={12} />
                       {isPlayingRecording ? 'Pause' : 'Play Yours'}
                     </button>
                     <button
                       onClick={playReferenceOnce}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-xs ${isPlaying ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                      className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 rounded-lg hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px] ${isPlaying ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
                     >
-                      <Headphones size={14} />
+                      <Headphones size={12} />
                       {isPlaying ? 'Pause' : 'Listen Ref'}
                     </button>
                     <button
                       onClick={() => { setRecordedBlob(null); setRecordedUrl(null); setAnalysisResult(null); }}
-                      className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 bg-rose-50 text-rose-700 rounded-xl hover:bg-rose-100 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-xs"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px]"
                     >
-                      <RefreshCw size={14} />
+                      <RefreshCw size={12} />
                       Try Again
                     </button>
                   </div>
@@ -1653,12 +1653,12 @@ export default function PracticePage() {
           )}
         </div>
 
-        <div className="bg-gray-50 p-5 flex items-center justify-between text-xs text-gray-500 border-t border-gray-100 rounded-b-[2rem] sm:rounded-b-[2.5rem]">
-          <span>Mode: <strong className="text-emerald-700 font-semibold bg-emerald-100 px-2.5 py-1 rounded-lg shadow-sm">Tartil (Slow)</strong></span>
-          <span className={`flex items-center gap-2.5 font-medium px-3 py-1.5 rounded-xl shadow-sm border ${isRecording ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-gray-100'}`}>
-            <span className="relative flex h-2.5 w-2.5">
+        <div className="bg-gray-50 p-4.5 flex items-center justify-between text-[11px] text-gray-500 border-t border-gray-100 rounded-b-[2rem] sm:rounded-b-[2.5rem]">
+          <span>Mode: <strong className="text-emerald-700 font-semibold bg-emerald-100 px-2 py-0.5 rounded-md shadow-sm">Tartil (Slow)</strong></span>
+          <span className={`flex items-center gap-2 font-medium px-2.5 py-1 rounded-lg shadow-sm border ${isRecording ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-gray-100'}`}>
+            <span className="relative flex h-2 w-2">
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isRecording ? 'bg-red-400' : 'bg-emerald-400'} opacity-75`}></span>
-              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isRecording ? 'bg-red-500' : 'bg-emerald-500'} shadow-sm`}></span>
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${isRecording ? 'bg-red-500' : 'bg-emerald-500'} shadow-sm`}></span>
             </span>
             {isRecording ? 'Recording...' : recordedBlob ? 'Recording saved' : 'Ready to record'}
           </span>
@@ -1701,59 +1701,58 @@ const AdvancedNavigator = ({
       onClick={() => setIsNavigatorOpen(false)}
     >
       <div
-        className="bg-white w-full max-w-xl rounded-[2.4rem] shadow-xl flex flex-col h-[80vh] border border-white/20 animate-in zoom-in-95 duration-500 overflow-hidden"
+        className="bg-white w-full max-w-[32.4rem] rounded-[2.1rem] shadow-xl flex flex-col h-[72vh] border border-white/20 animate-in zoom-in-95 duration-500 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 flex items-center justify-between border-b border-gray-200 bg-emerald-50/30">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-500 rounded-xl text-white shadow-lg shadow-emerald-200">
-              <Target size={19} />
+        <div className="px-5 py-3.5 flex items-center justify-between border-b border-gray-200 bg-emerald-50/30">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.25 bg-emerald-500 rounded-lg text-white shadow-lg shadow-emerald-200">
+              <Target size={17} />
             </div>
             <div>
-              <h3 className="text-lg font-black text-slate-800 tracking-tight leading-none">Quick Navigator</h3>
-              <p className="text-xs font-medium text-gray-500 mt-0.5">Jump to any Surah & Ayah quickly</p>
+              <h3 className="text-base font-black text-slate-800 tracking-tight leading-none">Quick Navigator</h3>
+              <p className="text-[11px] font-medium text-gray-500 mt-0.5">Jump to any Surah & Ayah quickly</p>
             </div>
           </div>
           <button
             onClick={() => setIsNavigatorOpen(false)}
-            className="p-2.5 rounded-full hover:bg-white hover:shadow-md text-slate-400 hover:text-slate-900 transition-all active:scale-90"
+            className="p-2.25 rounded-full hover:bg-white hover:shadow-md text-slate-400 hover:text-slate-900 transition-all active:scale-90"
           >
-            <X size={19} />
+            <X size={17} />
           </button>
         </div>
 
         <div className="flex-1 flex overflow-hidden">
           {/* Left: Surah Search & List */}
           <div className="w-2/3 flex flex-col border-r border-gray-200">
-            <div className="p-5">
+            <div className="p-4.5">
               <div className="relative group">
                 <input
                   type="text"
                   placeholder="Search Surah (e.g. Baqarah)"
-                  className="w-full h-8 pl-10 pr-3 bg-white border border-gray-200 rounded-lg text-slate-700 font-bold placeholder:text-slate-300 focus:ring-2 focus:ring-emerald-400 transition-all text-sm"
+                  className="w-full h-7 pl-9 pr-3 bg-white border border-gray-200 rounded-md text-slate-700 font-bold placeholder:text-slate-300 focus:ring-2 focus:ring-emerald-400 transition-all text-xs"
                   value={surahSearch}
                   onChange={(e) => setSurahSearch(e.target.value)}
                   autoFocus
                 />
-                <Mic size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-emerald-500 transition-colors" />
+                <Mic size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-emerald-500 transition-colors" />
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-0.5 scrollbar-hide">
+            <div className="flex-1 overflow-y-auto px-4.5 pb-4.5 space-y-0.5 scrollbar-hide">
               {filteredChapters.map(chapter => (
                 <button
                   key={chapter.id}
                   onClick={() => {
                     setSelectedChapter(chapter.id);
-                    setSelectedAyah(1); // Reset to first ayah when surah changes
                   }}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all group ${selectedChapter === chapter.id ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'hover:bg-gray-100 text-slate-600'}`}
+                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md transition-all group ${selectedChapter === chapter.id ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'hover:bg-gray-100 text-slate-600'}`}
                 >
-                  <span className={`text-[9px] font-black w-6 h-6 rounded-md flex items-center justify-center bg-gray-100 ${selectedChapter === chapter.id ? 'text-emerald-600' : 'text-slate-400 opacity-60'}`}>
+                  <span className={`text-[8px] font-black w-5 h-5 rounded-sm flex items-center justify-center bg-gray-100 ${selectedChapter === chapter.id ? 'text-emerald-600' : 'text-slate-400 opacity-60'}`}>
                     {chapter.id}
                   </span>
-                  <span className="font-bold tracking-tight text-sm flex-1 text-left">{chapter.name_simple}</span>
+                  <span className="font-bold tracking-tight text-xs flex-1 text-left">{chapter.name_simple}</span>
                   {selectedChapter === chapter.id && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/40" />}
                 </button>
               ))}
@@ -1762,12 +1761,12 @@ const AdvancedNavigator = ({
 
           {/* Right: Verse List */}
           <div className="w-1/3 flex flex-col bg-slate-50/30">
-            <div className="p-5 border-b border-gray-200 space-y-2.5">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">VERSE</p>
+            <div className="p-4.5 border-b border-gray-200 space-y-2">
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest text-center">VERSE</p>
               <input
                 type="text"
                 placeholder="Go to..."
-                className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-center font-bold text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-emerald-500/20 transition-all text-xs"
+                className="w-full px-2.5 py-1 bg-white border border-gray-200 rounded-md text-center font-bold text-slate-700 placeholder:text-slate-300 focus:ring-2 focus:ring-emerald-500/20 transition-all text-[11px]"
                 value={verseSearch}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, ''); // Numbers only
@@ -1775,8 +1774,8 @@ const AdvancedNavigator = ({
                 }}
               />
             </div>
-            <div className="flex-1 overflow-y-auto p-5 scrollbar-hide">
-              <div className="grid grid-cols-3 gap-2.5">
+            <div className="flex-1 overflow-y-auto p-4.5 scrollbar-hide">
+              <div className="grid grid-cols-3 gap-2">
                 {[...Array(ayahsCount)].map((_, i) => {
                   const num = i + 1;
                   // Filter list if searching
@@ -1790,7 +1789,7 @@ const AdvancedNavigator = ({
                         setVerseSearch(""); // Clear search
                         setIsNavigatorOpen(false); // Close on selection
                       }}
-                      className={`py-2 rounded-lg font-bold transition-all text-center text-sm ${selectedAyah === num ? 'bg-emerald-500 text-white shadow-md scale-105' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                      className={`py-1.5 rounded-md font-bold transition-all text-center text-xs ${selectedAyah === num ? 'bg-emerald-500 text-white shadow-md scale-105' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                     >
                       {num}
                     </button>

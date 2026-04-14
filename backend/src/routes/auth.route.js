@@ -1,6 +1,6 @@
 const express = require('express');
 const axios = require('axios');
-const { QF_CLIENT_ID, QF_CLIENT_SECRET, config } = require('../config/env');
+const { auth_config } = require('../config/env');
 
 const router = express.Router();
 
@@ -11,7 +11,8 @@ router.get('/login-url', (req, res) => {
   const nonce = Math.random().toString(36).substring(2, 15);
   
   // Using the discovered endpoint /oauth2/auth
-  const url = `${config.auth_base_url}/oauth2/auth?client_id=${QF_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect_uri)}&response_type=code&scope=openid&state=${state}&nonce=${nonce}`;
+  // For Identity, we use the Prelive keys (auth_config) which support openid
+  const url = `${auth_config.base_url}/oauth2/auth?client_id=${auth_config.client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}&response_type=code&scope=openid&state=${state}&nonce=${nonce}`;
   
   console.log(`[OAUTH] Generated Login URL: ${url}`);
   res.json({ url });
@@ -26,7 +27,7 @@ router.post('/callback', async (req, res) => {
 
   try {
     const response = await axios.post(
-      `${config.auth_base_url}/oauth2/token`,
+      `${auth_config.base_url}/oauth2/token`,
       new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
@@ -35,8 +36,8 @@ router.post('/callback', async (req, res) => {
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         auth: {
-          username: QF_CLIENT_ID,
-          password: QF_CLIENT_SECRET
+          username: auth_config.client_id,
+          password: auth_config.client_secret
         }
       }
     );

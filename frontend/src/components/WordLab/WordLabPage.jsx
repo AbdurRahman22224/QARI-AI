@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Mic, Loader2, Info, Volume2, RefreshCw, Clock, X, PlayCircle, Check, Zap, XCircle, ArrowLeft, AlertCircle, Sparkles, Award, Star, ChevronRight, FlaskConical } from 'lucide-react';
 import { renderTajweed, getLastVowel, splitVerseTajweedIntoWords, generateTajweedMap } from '../../utils/tajweedUtils';
-import { API } from '../../config/api';
+import { API, QURAN_CONTENT_BASE } from '../../config/api';
 
 const pad = (num) => String(num).padStart(3, '0');
 const generateWordAudioUrl = (surah, ayah, position) =>
@@ -41,12 +41,12 @@ const LEVELS = {
     selectedRing: 'ring-emerald-400',
     shadowColor: 'shadow-emerald-200',
     words: [
-      { id: 'b1', surah: 1, ayah: 3, position: 1 },   // ٱلرَّحْمَـٰنِ  — Heavy Ra with Shaddah
-      { id: 'b2', surah: 1, ayah: 6, position: 2 },   // ٱلصِّرَٰطَ     — Heavy Sad (ص)
-      { id: 'b3', surah: 1, ayah: 6, position: 3 },   // ٱلْمُسْتَقِيمَ  — Clean articulation practice
-      { id: 'b4', surah: 1, ayah: 7, position: 9 },   // ٱلضَّآلِّينَ    — Heavy Dad (ض)
-      { id: 'b5', surah: 1, ayah: 7, position: 6 },   // ٱلْمَغْضُوبِ    — Heavy Ghayn + Dad
-      { id: 'b6', surah: 1, ayah: 2, position: 3 },   // رَبِّ           — Ra with Kasra
+      { id: 'b1', surah: 1, ayah: 3, position: 1 },
+      { id: 'b2', surah: 96, ayah: 1, position: 5 },
+      { id: 'b3', surah: 1, ayah: 6, position: 3 },
+      { id: 'b4', surah: 33, ayah: 23, position: 15 },
+      { id: 'b5', surah: 4, ayah: 155, position: 15 },
+      { id: 'b6', surah: 16, ayah: 75, position: 1 },
     ],
   },
   medium: {
@@ -65,12 +65,12 @@ const LEVELS = {
     selectedRing: 'ring-amber-400',
     shadowColor: 'shadow-amber-200',
     words: [
-      { id: 'm1', surah: 3, ayah: 195, position: 30 }, // وَلَأُدْخِلَنَّهُمْ — Ghunnah (noon shaddah)
-      { id: 'm2', surah: 2, ayah: 282, position: 45 }, // يَسْتَطِيعُ         — Multi-syllable precision
+      { id: 'm1', surah: 2, ayah: 128, position: 7 }, // وَلَأُدْخِلَنَّهُمْ — Ghunnah (noon shaddah)
+      { id: 'm2', surah: 48, ayah: 29, position: 34 },
       { id: 'm3', surah: 2, ayah: 137, position: 15 }, // فَسَيَكْفِيكَهُمُ   — Complex phonetic chain
-      { id: 'm4', surah: 1, ayah: 4, position: 1 },    // مَـٰلِكِ             — Madd + articulation
-      { id: 'm5', surah: 1, ayah: 5, position: 1 },    // إِيَّاكَ             — Hamzah precision
-      { id: 'm6', surah: 1, ayah: 5, position: 4 },    // نَسْتَعِينُ          — Ayn from the throat
+      { id: 'm4', surah: 21, ayah: 40, position: 3 },    // مَـٰلِكِ             — Madd + articulation
+      { id: 'm5', surah: 111, ayah: 1, position: 5 },    // وتب — Surah Al-Masad
+      { id: 'm6', surah: 2, ayah: 27, position: 8 },    // نَسْتَعِينُ          — Ayn from the throat
     ],
   },
   advanced: {
@@ -91,12 +91,20 @@ const LEVELS = {
     words: [
       { id: 'a1', surah: 24, ayah: 55, position: 8 },  // وَلَيَسْتَخْلِفَنَّهُمْ — Ghunnah + long
       { id: 'a2', surah: 11, ayah: 28, position: 16 },  // أَنُلْزِمُكُمُوهَا      — Longest word challenge
-      { id: 'a3', surah: 1, ayah: 7, position: 3 },     // أَنْعَمْتَ               — Ikhfa + articulation
-      { id: 'a4', surah: 1, ayah: 4, position: 3 },     // ٱلدِّينِ                — Lam Shamsiyyah + Madd
+      { id: 'a3', surah: 25, ayah: 48, position: 11 },     // أَنْعَمْتَ               — Ikhfa + articulation
+      { id: 'a4', surah: 2, ayah: 1, position: 1 },     // ٱلدِّينِ                — Lam Shamsiyyah + Madd
       { id: 'a5', surah: 1, ayah: 1, position: 3 },     // ٱلرَّحْمَـٰنِ            — Opening Bismillah precision
-      { id: 'a6', surah: 1, ayah: 1, position: 4 },     // ٱلرَّحِيمِ               — Madd + heavy context
+      { id: 'a6', surah: 12, ayah: 18, position: 1 },     // ٱلرَّحِيمِ               — Madd + heavy context
     ],
   },
+};
+
+// Helper to generate a unique fingerprint for the word list to automate cache clearing
+const getLevelFingerprint = (words) => {
+  const str = JSON.stringify(words);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = ((hash << 5) - hash) + str.charCodeAt(i) | 0;
+  return Math.abs(hash).toString(36);
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -113,7 +121,8 @@ export default function WordLabPage() {
     const level = LEVELS[levelId];
     if (!level) return;
 
-    const CACHE_KEY = `wordlab_${levelId}_cache`;
+    const fingerprint = getLevelFingerprint(level.words);
+    const CACHE_KEY = `wordlab_${levelId}_autov1_${fingerprint}`;
     const CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 
     // Try cache
@@ -138,7 +147,7 @@ export default function WordLabPage() {
     const results = await Promise.all(
       Object.values(verseGroups).map(group =>
         fetch(
-          `https://api.quran.com/api/v4/verses/by_chapter/${group.surah}?language=en&words=true&per_page=1&page=${group.ayah}&fields=text_uthmani_tajweed,text_uthmani&word_fields=text_uthmani,text_uthmani_tajweed,char_type_name,position`
+          API.QURAN(`${QURAN_CONTENT_BASE}/verses/by_chapter/${group.surah}?language=en&words=true&per_page=1&page=${group.ayah}&fields=text_uthmani_tajweed,text_uthmani&word_fields=text_uthmani,text_uthmani_tajweed,char_type_name,position`)
         )
           .then(res => res.json())
           .then(data => ({ group, verse: data.verses?.[0] || null }))
@@ -468,7 +477,7 @@ export default function WordLabPage() {
       setIsAnalyzing(true);
       setResult(null);
       const formData = new FormData();
-      formData.append('audio', blob, 'practice.wav');
+      formData.append('audio', blob, 'practice.webm');
       formData.append('reference_audio_url', resolveAudioUrl(word));
       formData.append('word_text', word.text_uthmani);
       formData.append('surah_number', word._surah);

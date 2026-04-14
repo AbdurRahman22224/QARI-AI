@@ -1,6 +1,6 @@
 const express = require('express');
 const axios = require('axios');
-const { config, QF_CLIENT_ID } = require('../config/env');
+const { content_config } = require('../config/env');
 const { getAccessToken } = require('../services/auth.service');
 
 const router = express.Router();
@@ -11,7 +11,7 @@ router.use('/', async (req, res) => {
     const token = await getAccessToken();
     
     // req.url contains the path after /api/quran
-    const targetUrl = `${config.api_base_url}${req.url}`;
+    const targetUrl = `${content_config.base_url}${req.url}`;
     
     console.log(`[PROXY] ${req.method} ${targetUrl}`);
 
@@ -20,7 +20,7 @@ router.use('/', async (req, res) => {
       url: targetUrl,
       headers: {
         'x-auth-token': token,
-        'x-client-id': QF_CLIENT_ID,
+        'x-client-id': content_config.client_id,
       },
       data: req.method !== 'GET' ? req.body : undefined,
       params: req.method === 'GET' ? req.query : undefined

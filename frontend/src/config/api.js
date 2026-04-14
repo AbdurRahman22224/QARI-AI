@@ -13,7 +13,11 @@ export const API = {
   DASHBOARD_STATS: `${API_URL}/api/dashboard/stats`,
   DASHBOARD_TAJWEED: `${API_URL}/api/dashboard/tajweed`,
   DASHBOARD_AUDIO: (id) => `${API_URL}/api/dashboard/audio/${id}`,
+  // Secure Quran Proxy
+  QURAN: (path) => `${API_URL}/api/quran${path}`,
 };
+
+export const QURAN_CONTENT_BASE = '/content/api/v4';
 
 export const CALLBACK_URI = `${APP_URL}/callback`;
 export const APP_BASE_URL = APP_URL;

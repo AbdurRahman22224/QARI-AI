@@ -140,6 +140,7 @@ export default function App() {
       localStorage.clear();
       setIsAuthenticated(false);
       setUserProfile(null);
+      window.history.replaceState({}, document.title, "/");
     }
   };
 
@@ -186,7 +187,7 @@ export default function App() {
             <BookOpen className="text-white" size={isPracticeTab ? '1.15rem' : '1.4rem'} />
           </div>
           {isSidebarExpanded && (
-            <span className={`${isPracticeTab ? 'text-xs' : 'text-s'} font-semibold text-gray-400 animate-fade-in whitespace-nowrap`}>
+            <span className={`${isPracticeTab ? 'text-xs' : 'text-sm'} font-bold text-gray-650 animate-fade-in whitespace-nowrap`}>
               Qari AI
             </span>
           )}

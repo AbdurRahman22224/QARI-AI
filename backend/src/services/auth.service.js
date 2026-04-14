@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { QF_CLIENT_ID, QF_CLIENT_SECRET, config } = require('../config/env');
+const { content_config } = require('../config/env');
 
 let tokenCache = {
   token: null,
@@ -17,15 +17,15 @@ async function getAccessToken() {
   // Fetch new token
   try {
     const response = await axios.post(
-      `${config.auth_base_url}/oauth2/token`,
+      `${content_config.auth_url}/oauth2/token`,
       'grant_type=client_credentials&scope=content',
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         auth: {
-          username: QF_CLIENT_ID,
-          password: QF_CLIENT_SECRET
+          username: content_config.client_id,
+          password: content_config.client_secret
         }
       }
     );

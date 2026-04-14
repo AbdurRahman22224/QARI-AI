@@ -64,11 +64,18 @@ router.post('/analyze', upload.single('audio'), async (req, res) => {
 // Proxy to ASR Service (Word Trainer 3.0 Pre-Analysis)
 router.post('/analyze-reference', async (req, res) => {
   try {
-    const response = await axios.post(`${ASR_SERVICE_URL}/api/analyze-reference`, req.body);
+    const response = await axios.post(`${ASR_SERVICE_URL}/api/analyze-reference`, req.body, { timeout: 30000 });
     res.json(response.data);
   } catch (error) {
-    console.error('❌ Reference analysis proxy error:', error.message);
-    res.status(error.response?.status || 500).json(error.response?.data || { error: 'ASR Service connection failed' });
+    const status = error.response?.status || 500;
+    if (status === 504 || error.code === 'ECONNABORTED') {
+      console.warn(`[ASR Proxy] 🌙 Python service is likely waking from sleep (Timeout/504).`);
+    } else if (error.code === 'ECONNREFUSED') {
+      console.warn(`[ASR Proxy] 🛑 Python service is currently offline.`);
+    } else {
+      console.error('❌ Reference analysis proxy error:', error.message);
+    }
+    res.status(status).json(error.response?.data || { error: 'ASR Service connection failed' });
   }
 });
 
@@ -79,8 +86,8 @@ router.post('/analyze-word-hybrid', upload.single('audio'), async (req, res) => 
   try {
     const formData = new FormData();
     formData.append('audio', req.file.buffer, {
-      filename: 'practice.wav',
-      contentType: req.file.mimetype || 'audio/wav',
+      filename: 'practice.webm',
+      contentType: req.file.mimetype || 'audio/webm',
     });
     
     // Pass along all form fields
@@ -90,7 +97,7 @@ router.post('/analyze-word-hybrid', upload.single('audio'), async (req, res) => 
 
     const response = await axios.post(`${ASR_SERVICE_URL}/analyze-word-hybrid`, formData, {
       headers: formData.getHeaders(),
-      timeout: 60000,
+      timeout: 120000,
     });
 
     res.json(response.data);
@@ -106,8 +113,20 @@ router.post('/analyze-word-hybrid', upload.single('audio'), async (req, res) => 
       }).catch(err => console.error('[DB] Async word save failed:', err.message));
     }
   } catch (error) {
-    console.error("[Word Hybrid] Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Hybrid analysis failed", details: error.response?.data || error.message });
+    if (error.code === 'ECONNABORTED') {
+      console.error("❌ [Word Hybrid] Timeout exceeded (120s)");
+      res.status(504).json({ error: "Analysis timed out. Try again with a shorter recording." });
+    } else if (error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
+      console.error("❌ [Word Hybrid] ASR Service connection failed/reset");
+      res.status(503).json({ error: "ASR Service unavailable. Check if Python is running." });
+    } else {
+      const errorData = error.response?.data || { error: error.message };
+      console.error("[Word Hybrid] Error:", errorData);
+      res.status(error.response?.status || 500).json({ 
+        error: "Hybrid analysis failed", 
+        details: errorData 
+      });
+    }
   }
 });
 

@@ -238,12 +238,29 @@ async function getDashboardStats(qfUserId, filter = 'recent') {
         .from('practice_sessions')
         .select('score')
         .eq('qf_user_id', qfUserId),
-      supabase
-        .from('practice_sessions')
-        .select('id, surah_number, ayah_number, score, accuracy, grade, created_at, mistake_count, total_words, duration_secs')
-        .eq('qf_user_id', qfUserId)
-        .order('created_at', { ascending: false })
-        .limit(20)
+      (() => {
+        // Build analysisWindow query based on filter parameter
+        let query = supabase
+          .from('practice_sessions')
+          .select('id, surah_number, ayah_number, score, accuracy, grade, created_at, mistake_count, total_words, duration_secs')
+          .eq('qf_user_id', qfUserId);
+
+        // Apply filter conditions
+        if (filter === 'struggling') {
+          query = query.lt('score', 80); // Sessions with score < 80
+        } else if (filter === 'this_week') {
+          // Calculate 7-day window start at midnight UTC.
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+          sevenDaysAgo.setHours(0, 0, 0, 0);
+          const sevenDaysAgoStr = sevenDaysAgo.toISOString();
+          query = query.gte('created_at', sevenDaysAgoStr); // Sessions from last 7 days
+        }
+
+        // Keep recent/struggling compact; week should include full 7-day dataset.
+        const base = query.order('created_at', { ascending: false });
+        return filter === 'this_week' ? base : base.limit(20);
+      })()
     ]);
 
     const dbName = dbUserResult.data?.name;
@@ -255,16 +272,27 @@ async function getDashboardStats(qfUserId, filter = 'recent') {
     )
       .size;
 
+    const toLocalYmd = (isoTs) => {
+      const d = new Date(isoTs);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
     practiceDates = [...new Set(
-      (dateDataResult.data || []).map(r => r.created_at.slice(0, 10))
+      (dateDataResult.data || []).map(r => toLocalYmd(r.created_at))
     )].sort().reverse();
 
     streak = calculateStreak(practiceDates);
 
     // Calculate days active in the last 7 days for "Weekly Volume"
     const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 10);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    const y = sevenDaysAgo.getFullYear();
+    const m = String(sevenDaysAgo.getMonth() + 1).padStart(2, '0');
+    const d = String(sevenDaysAgo.getDate()).padStart(2, '0');
+    const sevenDaysAgoStr = `${y}-${m}-${d}`;
     daysThisWeek = practiceDates.filter(d => d >= sevenDaysAgoStr).length;
 
     avgScore = scoreDataResult.data && scoreDataResult.data.length > 0
@@ -330,7 +358,11 @@ async function getDashboardStats(qfUserId, filter = 'recent') {
       return a.score - b.score;
     });
 
-    recentSessions = (analysisWindow || []).slice(0, 10).map(s => {
+    const sessionWindow = filter === 'this_week'
+      ? (analysisWindow || [])
+      : (analysisWindow || []).slice(0, 10);
+
+    recentSessions = sessionWindow.map(s => {
       const rules = allFeedback.filter(f => f.session_id === s.id);
       const weakest = rules.sort((a, b) => a.score - b.score)[0];
       return {
@@ -471,26 +503,70 @@ async function getTajweedMastery(qfUserId) {
  * Calculate streak from sorted date strings (newest first)
  */
 function calculateStreak(dates) {
-  if (!dates || dates.length === 0) return 0;
+  if (!Array.isArray(dates) || dates.length === 0) return 0;
 
-  const today = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const MS_PER_DAY = 86400000;
 
-  // Must have practiced today or yesterday to have an active streak
-  if (dates[0] !== today && dates[0] !== yesterday) return 0;
+  // Parse YYYY-M-D / YYYY-MM-DD safely and return a day index (UTC-based integer day)
+  // from local calendar components to avoid timezone off-by-one issues.
+  const parseDayIndex = (value) => {
+    if (typeof value !== 'string') return null;
+    const match = value.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+    const utcMs = Date.UTC(year, month - 1, day);
+    const check = new Date(utcMs);
+
+    // Reject impossible dates like 2024-02-31.
+    if (
+      check.getUTCFullYear() !== year ||
+      check.getUTCMonth() !== month - 1 ||
+      check.getUTCDate() !== day
+    ) {
+      return null;
+    }
+
+    return Math.floor(utcMs / MS_PER_DAY);
+  };
+
+  // Build today's day index from local date parts (user calendar day), then anchor in UTC.
+  const now = new Date();
+  const todayUtcMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayIndex = Math.floor(todayUtcMs / MS_PER_DAY);
+
+  // Normalize, dedupe, and drop invalid/future days.
+  const daySet = new Set();
+  for (const raw of dates) {
+    const dayIndex = parseDayIndex(raw);
+    if (dayIndex === null) continue;
+    if (dayIndex > todayIndex) continue;
+    daySet.add(dayIndex);
+  }
+
+  if (daySet.size === 0) return 0;
+
+  let latestDay = -Infinity;
+  for (const d of daySet) {
+    if (d > latestDay) latestDay = d;
+  }
+
+  // Active streak only if latest activity is today or yesterday.
+  if (todayIndex - latestDay > 1) return 0;
 
   let streak = 0;
-  const check = new Date(dates[0]);
-
-  for (let i = 0; i < 365; i++) {
-    const dateStr = check.toISOString().slice(0, 10);
-    if (dates.includes(dateStr)) {
-      streak++;
-    } else if (i > 0) {
-      break;
-    }
-    check.setDate(check.getDate() - 1);
+  let cursor = latestDay;
+  while (daySet.has(cursor)) {
+    streak++;
+    cursor--;
   }
+
   return streak;
 }
 

@@ -41,6 +41,7 @@ CORS(app)
 # ── Model Loading ──
 print("⏳ Loading Whisper model (small)...")
 from faster_whisper import WhisperModel
+# Using 'base' instead of 'small' for better performance and RAM usage on local machines
 model = WhisperModel("small", device="cpu", compute_type="int8")
 print("✅ Whisper model loaded!")
 
@@ -78,23 +79,23 @@ def get_audio_from_url(url: str):
     if url in REFERENCE_CACHE: 
         return REFERENCE_CACHE[url]
 
-    # Use unique lock to prevent redundant redundant parallel downloads
+    # Use unique lock to prevent redundant parallel downloads
     with get_ref_lock(url):
-        # Double check after acquiring lock
+        # Double check cache after acquiring lock
         if url in REFERENCE_CACHE:
             return REFERENCE_CACHE[url]
             
-        print(f"📥 [Cache] Fetching reference audio: {url}")
+        print(f"   📥 [ASR] Fetching reference audio: {url[:60]}...", flush=True)
         try:
-            r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
+            r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0' }, timeout=15)
             r.raise_for_status()
             
             with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as t1:
                 t1.write(r.content)
                 tmp_path = t1.name
+                print(f"   📂 [ASR] Saved to: {tmp_path}", flush=True)
             
             try:
-                # Use our robust preprocessing for reference audio too
                 audio, sr, _ = load_and_preprocess_audio(tmp_path)
                 REFERENCE_CACHE[url] = (audio, sr)
                 return REFERENCE_CACHE[url]
@@ -135,24 +136,21 @@ def analyze_reference():
         if not ref_url:
             return jsonify({"duration": 0, "status": "no_url"}), 200
 
-        # Sync the cache check and fetch to prevent redundant parallel downloads
-        with get_ref_lock(ref_url):
-            # 🕒 Check Cache First
-            if ref_url in DURATION_CACHE:
-                return jsonify({
-                    "duration": DURATION_CACHE[ref_url],
-                    "status": "success",
-                    "cached": True
-                }), 200
+        # 🕒 Check Cache First
+        if ref_url in DURATION_CACHE:
+            return jsonify({
+                "duration": DURATION_CACHE[ref_url],
+                "status": "success",
+                "cached": True
+            }), 200
 
-            # Fetch via get_audio_from_url to benefit from centralized fetch logic
-            audio_data, sr = get_audio_from_url(ref_url)
-            if audio_data is None:
-                return jsonify({"duration": 0, "status": "fetch_failed"}), 200
-            
-            duration = float(len(audio_data)) / sr
-            DURATION_CACHE[ref_url] = round(duration, 2)
-            print(f"🕒 Cache Updated: {ref_url} → {duration:.2f}s")
+        # 🔥 FIX: Deadlock removed (get_audio_from_url handles its own locking)
+        audio_data, sr = get_audio_from_url(ref_url)
+        if audio_data is None:
+            return jsonify({"duration": 0, "status": "fetch_failed"}), 200
+        
+        duration = float(len(audio_data)) / sr
+        DURATION_CACHE[ref_url] = round(duration, 2)
         
         return jsonify({
             "duration": round(duration, 2),
@@ -212,39 +210,56 @@ def analyze():
             try: os.unlink(audio_path)
             except: pass
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    print("\n" + "!" * 60)
+    print("🚨 UNHANDLED ASR EXCEPTION")
+    print("-" * 60)
+    traceback.print_exc()
+    print("!" * 60 + "\n")
+    return jsonify({"error": str(e), "type": type(e).__name__}), 500
+
 @app.route('/analyze-word-hybrid', methods=['POST'])
 def analyze_word_hybrid():
     """
     Hybrid analysis endpoint for the Word Lab Trainer.
     Compares USER audio against MASTER REFERENCE audio using the new pipeline.
     """
-    if 'audio' not in request.files:
-        return jsonify({"error": "No user audio provided"}), 400
-    
     ref_url = request.form.get('reference_audio_url', '')
     word_text = request.form.get('word_text', '')
     tajweed_map_str = request.form.get('tajweed_map', '{}')
     
     if not ref_url:
+        print("   ❌ Error: No reference URL")
         return jsonify({"error": "No reference audio URL provided"}), 400
     
     try:
         tajweed_map = json.loads(tajweed_map_str)
-    except:
+    except Exception as e:
+        print(f"   ⚠️ tajweed_map parse error: {e}")
         tajweed_map = {}
 
     user_file = request.files['audio']
     with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as tmp:
         user_file.save(tmp.name)
         user_path = tmp.name
+        print(f"   📂 Temp WebM: {user_path}")
 
     try:
         # Pre-fetch reference duration for the score component
+        print("   📡 Fetching reference audio metrics...")
         ref_audio, ref_sr = get_audio_from_url(ref_url)
-        ref_dur = len(ref_audio)/ref_sr if ref_audio is not None else 0.0
+        if ref_audio is not None and ref_sr:
+            ref_dur = len(ref_audio) / ref_sr
+            print(f"   ✅ Ref duration: {ref_dur:.2f}s")
+        else:
+            print(f"   ⚠️ [WordLab] Reference audio unavailable for: {ref_url}")
+            ref_dur = 0.0
         
         # Call the unified pipeline orchestrator for this single word
         from src.utils.tajweed_pipeline import process_audio_pipeline
+        print("   🚀 Starting evaluation pipeline...")
         result = process_audio_pipeline(user_path, [word_text], tajweed_map, ref_dur, asr_model=model, strict_pace=True)
         
         # Format response for Word Lab UI compatibility
@@ -282,13 +297,16 @@ def analyze_word_hybrid():
         })
     except Exception as e:
         import traceback
+        print("\n" + "!" * 60)
+        print(f"❌ Word Lab internal error: {e}")
         traceback.print_exc()
-        print(f"❌ Word Lab error: {e}")
-        return jsonify({"error": str(e)}), 500
+        print("!" * 60 + "\n")
+        return jsonify({"error": str(e), "type": type(e).__name__}), 500
     finally:
         if 'user_path' in locals() and os.path.exists(user_path):
             try:
                 os.unlink(user_path)
+                print(f"   🧹 Cleaned up: {user_path}")
             except:
                 pass
 

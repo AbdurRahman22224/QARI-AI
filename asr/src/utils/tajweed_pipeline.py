@@ -119,31 +119,28 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
     print(f"   Expected words: {expected_word_list}", flush=True)
     print(f"   Tajweed map: {tajweed_map}", flush=True)
     print(f"   Ref duration: {ref_duration}s", flush=True)
-    print(f"{'='*60}", flush=True)
-    
-    # 1. Preprocessing (for feature extraction only)
-    print("📦 Step 1: Preprocessing audio...", flush=True)
+    print    # 1. Preprocessing (for feature extraction only)
+    print("\n   [Step 1] Preprocessing audio...", flush=True)
     audio, sr, trim_offset = load_and_preprocess_audio(wav_path)
     
     total_trimmed_duration = len(audio) / sr
     if total_trimmed_duration <= 0.0:
         raise ValueError("Audio is empty or too short after silence trimming.")
-    print(f"   ✅ Audio loaded: {total_trimmed_duration:.2f}s, sr={sr}, trim_offset={trim_offset:.3f}s", flush=True)
+    print(f"   ✅ Preprocessing done: {total_trimmed_duration:.2f}s audio", flush=True)
         
     # 2. Parallel Module Execution
-    print("⚡ Step 2: Running ASR + Feature Extraction in parallel...", flush=True)
+    print("   [Step 2] Parallel ASR + Features...", flush=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         # Thread A: Feature extraction frames (uses preprocessed numpy)
         future_features = executor.submit(extract_frame_features, audio, sr)
         
-        # Thread B: ASR Transcription — pass RAW FILE PATH for best accuracy
-        # faster_whisper has its own internal decoder that handles webm/mp3 natively
+        # Thread B: ASR Transcription
         def run_asr():
             if asr_model is None:
                 raise RuntimeError("ASR model not loaded — cannot transcribe.")
             
-            # Selection of prompt: single-word prompt for Word Lab, generic for full verses
             prompt_text = expected_word_list[0] if len(expected_word_list) == 1 else "آيات القرآن الكريم"
+            print(f"      - ASR: Transcribing with prompt '{prompt_text[:30]}...'", flush=True)
             
             segments_gen, info = asr_model.transcribe(
                 wav_path, language="ar", word_timestamps=True, 
@@ -161,17 +158,17 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
                             "end": w.end,
                             "prob": w.probability
                         })
+            print(f"      - ASR: Internal transcribe complete ({len(w_words)} words)", flush=True)
             return w_words
             
         future_asr = executor.submit(run_asr)
         
         global_frames = future_features.result()
+        print("      - Features: Extraction complete", flush=True)
         asr_result_words = future_asr.result()
+        print("      - ASR: Result ready", flush=True)
 
-    print(f"   ✅ Feature frames extracted: {len(global_frames.get('rms', []))} frames", flush=True)
-    print(f"   ✅ ASR returned {len(asr_result_words)} words", flush=True)
-    for w in asr_result_words:
-        print(f"      ASR: '{w['word']}' [{w['start']:.2f}s - {w['end']:.2f}s] (prob: {w['prob']:.2f})", flush=True)
+    print(f"   ✅ Parallel execution done", flush=True)
 
     # Flatten faster_whisper segments into a word list with timings
     asr_words = []
@@ -186,12 +183,13 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
         })
 
     # 3. Alignment Layer
-    print("🔗 Step 3: Word alignment...", flush=True)
+    print("   [Step 3] Word alignment...", flush=True)
     comparison = compare_words(asr_words, asr_timings, expected_word_list)
     accuracy_score = comparison["accuracy"]
-    print(f"   ✅ Accuracy: {accuracy_score}%", flush=True)
+    print(f"   ✅ Alignment done (Accuracy: {accuracy_score}%)", flush=True)
     
     # 4 & 5 & 6. Validation and Scoring
+    print("   [Step 4] Tajweed rule evaluation...", flush=True)
     print("📊 Step 4: Tajweed rule evaluation...", flush=True)
     
     # Compute REAL reference baseline from the user's own recording (global average)
