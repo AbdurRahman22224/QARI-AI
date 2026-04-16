@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
-const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = require('../config/env');
+const axios = require('axios');
+const { SUPABASE_URL, SUPABASE_SERVICE_KEY, auth_config } = require('../config/env');
 
 // Initialize Supabase client with service role (bypasses RLS)
 const supabase = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
@@ -199,7 +200,7 @@ async function saveWordLabAttempt(qfUserId, result, meta) {
 /**
  * Get dashboard stats for a user
  */
-async function getDashboardStats(qfUserId, filter = 'recent') {
+async function getDashboardStats(qfUserId, filter = 'recent', userToken = null) {
   if (!supabase || qfUserId === 'guest') return null;
 
   // Initialize variables that will be used in the return statement
@@ -284,7 +285,28 @@ async function getDashboardStats(qfUserId, filter = 'recent') {
       (dateDataResult.data || []).map(r => toLocalYmd(r.created_at))
     )].sort().reverse();
 
-    streak = calculateStreak(practiceDates);
+    streak = 0;
+    if (userToken && auth_config && auth_config.client_id) {
+      try {
+        const streakRes = await axios.get('https://apis-prelive.quran.foundation/auth/v1/streaks/current-streak-days?type=QURAN', {
+          headers: {
+            'Accept': 'application/json',
+            'x-auth-token': userToken,
+            'x-client-id': auth_config.client_id
+          },
+          timeout: 5000
+        });
+        if (streakRes.data && streakRes.data.success && streakRes.data.data && typeof streakRes.data.data.days !== 'undefined') {
+          streak = streakRes.data.data.days;
+        } else {
+          streak = calculateStreak(practiceDates);
+        }
+      } catch (e) {
+        streak = calculateStreak(practiceDates); // fallback
+      }
+    } else {
+      streak = calculateStreak(practiceDates);
+    }
 
     // Calculate days active in the last 7 days for "Weekly Volume"
     const sevenDaysAgo = new Date();
@@ -409,6 +431,15 @@ async function getDashboardStats(qfUserId, filter = 'recent') {
         sub: `You mastered Ayah ${latest.ayah_number}. Ready for Ayah ${latest.ayah_number + 1}?`,
         surah: latest.surah_number,
         ayah: latest.ayah_number + 1
+      };
+    } else {
+      // 🌟 Starter Goal for New Users (Judge Onboarding)
+      nextAction = {
+        type: 'starter',
+        label: 'Kickstart your Journey! 🚀',
+        sub: 'Start with Surah Al-Fatiha (The Opening) to baseline your Tajweed.',
+        surah: 1,
+        ayah: 1
       };
     }
 

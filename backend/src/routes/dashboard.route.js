@@ -11,7 +11,7 @@ router.get('/stats', async (req, res) => {
 
   try {
     const { filter } = req.query;
-    const stats = await getDashboardStats(req.userId, filter);
+    const stats = await getDashboardStats(req.userId, filter, req.token);
     if (!stats) return res.json({ source: 'guest', message: 'DB unavailable' });
 
     res.json({ source: 'db', ...stats });

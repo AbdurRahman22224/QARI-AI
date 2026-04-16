@@ -2,6 +2,9 @@ faster-whisper
 flask
 flask-cors
 python-Levenshtein
-librosa
 numpy
-scikit-learn
+mutagen
+requests
+imageio-ffmpeg
+soundfile
+scipy

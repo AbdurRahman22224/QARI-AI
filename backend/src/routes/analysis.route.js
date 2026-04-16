@@ -92,6 +92,7 @@ router.post('/analyze-word-hybrid', upload.single('audio'), async (req, res) => 
     
     // Pass along all form fields
     if (req.body.reference_audio_url) formData.append('reference_audio_url', req.body.reference_audio_url);
+    if (req.body.reference_duration) formData.append('reference_duration', req.body.reference_duration);
     if (req.body.word_text) formData.append('word_text', req.body.word_text);
     if (req.body.tajweed_map) formData.append('tajweed_map', req.body.tajweed_map);
 

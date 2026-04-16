@@ -9,6 +9,7 @@ export const API = {
   ANALYZE_WORD: `${API_URL}/api/analyze-word-hybrid`,
   AUTH_LOGIN: `${API_URL}/api/auth/login-url`,
   AUTH_CALLBACK: `${API_URL}/api/auth/callback`,
+  AUTH_REFRESH: `${API_URL}/api/auth/refresh`,
   AUTH_UPSERT: `${API_URL}/api/auth/upsert-user`,
   DASHBOARD_STATS: `${API_URL}/api/dashboard/stats`,
   DASHBOARD_TAJWEED: `${API_URL}/api/dashboard/tajweed`,

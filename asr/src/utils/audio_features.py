@@ -1,7 +1,7 @@
 """
 Audio Feature Extraction Engine for Qari AI.
-Uses numpy/scipy for frame-based analysis (RMS Energy, Spectral Centroid, Band Ratios).
-25ms window, 10ms hop. No librosa dependency in hot path — zero JIT overhead.
+Uses numpy/scipy for optimized frame-based analysis (RMS Energy, Spectral Centroid, Band Ratios).
+25ms window, 10ms hop. Optimized for low-latency Word Lab training.
 """
 import os
 import subprocess
@@ -114,7 +114,7 @@ def load_and_preprocess_audio(audio_path: str, sr: int = 16000):
 
 def extract_frame_features(audio: np.ndarray, sr: int = 16000):
     """
-    Extract Frame-based Features using pure numpy/scipy (no librosa, no numba JIT).
+    Extract Frame-based Features using pure numpy/scipy.
     25ms window, 10ms hop.
     """
     import time

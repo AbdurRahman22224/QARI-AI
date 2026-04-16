@@ -21,16 +21,19 @@ import numpy as np
 import imageio_ffmpeg
 from flask import Flask, request, jsonify
 
-# Get absolute path to ffmpeg for reliability on Windows
-try:
-    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-except:
-    ffmpeg_path = "ffmpeg"
-from flask_cors import CORS
-import mutagen
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 from io import BytesIO
+
+# --- HuggingFace / Docker Optimization ---
+# 1. Prioritize system ffmpeg in Linux environments
+if os.name != 'nt':
+    ffmpeg_path = '/usr/bin/ffmpeg'
+else:
+    try:
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+    except:
+        ffmpeg_path = "ffmpeg"
 
 from src.utils.normalize_arabic import normalize_arabic
 from src.utils.tajweed_pipeline import levenshtein_similarity
@@ -107,8 +110,6 @@ def get_audio_from_url(url: str):
                     
         except Exception as e:
             print(f"❌ [Cache] Ref audio download failed for {url}: {e}")
-            # Cache the failure as None to avoid repeated timeouts on 404s
-            REFERENCE_CACHE[url] = (None, None)
             return None, None
 
 @app.route('/', methods=['GET'])
@@ -248,14 +249,19 @@ def analyze_word_hybrid():
 
     try:
         # Pre-fetch reference duration for the score component
-        print("   📡 Fetching reference audio metrics...")
-        ref_audio, ref_sr = get_audio_from_url(ref_url)
-        if ref_audio is not None and ref_sr:
-            ref_dur = len(ref_audio) / ref_sr
-            print(f"   ✅ Ref duration: {ref_dur:.2f}s")
+        provided_ref_dur = request.form.get('reference_duration')
+        if provided_ref_dur and float(provided_ref_dur) > 0:
+            ref_dur = float(provided_ref_dur)
+            print(f"   ⚡ Fast Path: Using precomputed ref duration: {ref_dur:.2f}s")
         else:
-            print(f"   ⚠️ [WordLab] Reference audio unavailable for: {ref_url}")
-            ref_dur = 0.0
+            print("   📡 Fetching reference audio metrics (Slow Path)...")
+            ref_audio, ref_sr = get_audio_from_url(ref_url)
+            if ref_audio is not None and ref_sr:
+                ref_dur = len(ref_audio) / ref_sr
+                print(f"   ✅ Ref duration: {ref_dur:.2f}s")
+            else:
+                print(f"   ⚠️ [WordLab] Reference audio unavailable for: {ref_url}")
+                ref_dur = 0.0
         
         # Call the unified pipeline orchestrator for this single word
         from src.utils.tajweed_pipeline import process_audio_pipeline
@@ -312,8 +318,13 @@ def analyze_word_hybrid():
 
 
 if __name__ == '__main__':
-    print("🎤 Qari AI ASR Service v4.0 (Enhanced Analysis)")
-    print("=" * 40)
     port = int(os.environ.get('PORT', 5001))
-    print(f"Starting on http://localhost:{port}")
+    env_name = "Hugging Face Space" if os.environ.get('SPACE_ID') else "Local Environment"
+    
+    print("\n" + "="*60)
+    print(f"🎤 Qari AI ASR Service v4.0 (Cloud Stable)")
+    print(f"🌍 Mode: {env_name}")
+    print(f"🚀 Host: http://0.0.0.0:{port}")
+    print("="*60 + "\n")
+    
     app.run(host='0.0.0.0', port=port, debug=False)

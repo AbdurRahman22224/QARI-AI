@@ -39,15 +39,62 @@ export default function App() {
     const idToken = localStorage.getItem('user_id_token');
     const isMock = localStorage.getItem('is_mock_login');
 
+    // Global fetch interceptor to auto-logout on 401
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 401) {
+        const refreshToken = localStorage.getItem('user_refresh_token');
+        if (refreshToken && !args[0].includes('/api/auth/refresh')) {
+          try {
+            // Attempt one-time surgical refresh
+            const refreshRes = await originalFetch(API.AUTH_REFRESH, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh_token: refreshToken })
+            });
+            const refreshData = await refreshRes.json();
+            if (refreshData.access_token) {
+              localStorage.setItem('user_access_token', refreshData.access_token);
+              if (refreshData.refresh_token) localStorage.setItem('user_refresh_token', refreshData.refresh_token);
+              
+              // Retry the original request with the new token
+              const originalOptions = args[1] || {};
+              const originalHeaders = originalOptions.headers || {};
+              originalHeaders['Authorization'] = `Bearer ${refreshData.access_token}`;
+              return await originalFetch(args[0], { ...originalOptions, headers: originalHeaders });
+            }
+          } catch (e) {
+            console.error("[Auth] Background refresh failed:", e);
+          }
+        }
+
+        if (localStorage.getItem('user_access_token')) {
+            localStorage.removeItem('user_access_token');
+            localStorage.removeItem('user_id_token');
+            localStorage.removeItem('user_refresh_token');
+            window.location.href = '/';
+        }
+      }
+      return response;
+    };
+
     if (token) {
-      setIsAuthenticated(true);
-      if (idToken) {
-        const decoded = parseJwt(idToken) || parseJwt(token);
-        if (decoded) setUserProfile(decoded);
+      const decodedAccess = parseJwt(token);
+      // Check if token is expired
+      if (decodedAccess && decodedAccess.exp && decodedAccess.exp * 1000 < Date.now()) {
+        localStorage.removeItem('user_access_token');
+        localStorage.removeItem('user_id_token');
+        setIsAuthenticated(false);
+        setUserProfile(null);
       } else {
-        // Fallback if no ID token is present, try decoding access token
-        const decoded = parseJwt(token);
-        if (decoded) setUserProfile(decoded);
+        setIsAuthenticated(true);
+        if (idToken) {
+          const decoded = parseJwt(idToken) || decodedAccess;
+          if (decoded) setUserProfile(decoded);
+        } else {
+          if (decodedAccess) setUserProfile(decodedAccess);
+        }
       }
     } else if (isMock) {
       setIsAuthenticated(true);
@@ -97,6 +144,7 @@ export default function App() {
       if (data.access_token) {
         localStorage.setItem('user_access_token', data.access_token);
         if (data.id_token) localStorage.setItem('user_id_token', data.id_token);
+        if (data.refresh_token) localStorage.setItem('user_refresh_token', data.refresh_token);
 
         setIsAuthenticated(true);
         const decoded = parseJwt(data.id_token || data.access_token);

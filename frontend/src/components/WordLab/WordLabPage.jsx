@@ -484,6 +484,9 @@ export default function WordLabPage() {
       formData.append('ayah_number', word._ayah);
       formData.append('word_position', word.position);
       formData.append('difficulty', selectedLevel || 'intermediate');
+      if (refMetrics?.duration) {
+        formData.append('reference_duration', refMetrics.duration);
+      }
 
       const wordTajweedMap = generateTajweedMap([word]);
       formData.append('tajweed_map', JSON.stringify(wordTajweedMap));

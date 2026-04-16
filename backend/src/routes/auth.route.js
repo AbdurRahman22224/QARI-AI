@@ -12,7 +12,7 @@ router.get('/login-url', (req, res) => {
   
   // Using the discovered endpoint /oauth2/auth
   // For Identity, we use the Prelive keys (auth_config) which support openid
-  const url = `${auth_config.base_url}/oauth2/auth?client_id=${auth_config.client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}&response_type=code&scope=openid&state=${state}&nonce=${nonce}`;
+  const url = `${auth_config.base_url}/oauth2/auth?client_id=${auth_config.client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}&response_type=code&scope=openid%20offline_access%20user%20streak&state=${state}&nonce=${nonce}`;
   
   console.log(`[OAUTH] Generated Login URL: ${url}`);
   res.json({ url });
@@ -46,6 +46,33 @@ router.post('/callback', async (req, res) => {
   } catch (error) {
     console.error("[OAUTH] Callback error:", error.response?.data || error.message);
     res.status(500).json({ error: "Failed to exchange authorization code", details: error.response?.data });
+  }
+});
+
+// Refresh OAuth Token
+router.post('/refresh', async (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) return res.status(400).json({ error: "Refresh token required" });
+
+  try {
+    const response = await axios.post(
+      `${auth_config.base_url}/oauth2/token`,
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refresh_token
+      }).toString(),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        auth: {
+          username: auth_config.client_id,
+          password: auth_config.client_secret
+        }
+      }
+    );
+    res.json(response.data);
+  } catch (error) {
+    console.error("[OAUTH] Refresh error:", error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({ error: "Failed to refresh token", details: error.response?.data });
   }
 });
 

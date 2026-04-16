@@ -27,8 +27,13 @@ function identifyUser(req, res, next) {
     const token = authHeader.split(' ')[1];
     const decoded = parseJwt(token);
 
+    if (decoded && decoded.exp && decoded.exp * 1000 < Date.now()) {
+      return res.status(401).json({ error: 'token_expired', message: 'User access token has expired' });
+    }
+
     if (decoded && decoded.sub) {
       req.userId = decoded.sub;
+      req.token = token;
       req.userName = decoded.name || decoded.preferred_username || decoded.nickname || decoded.given_name || (decoded.email ? decoded.email.split('@')[0] : 'Student');
       req.userEmail = decoded.email || '';
     } else {

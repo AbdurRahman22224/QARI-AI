@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Point to dependencies inside the asr folder
 COPY asr/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt imageio-ffmpeg mutagen
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy everything from the asr directory into the container
 COPY asr/ .
