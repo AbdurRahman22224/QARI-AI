@@ -20,7 +20,7 @@ import subprocess
 import numpy as np
 import imageio_ffmpeg
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask_cors import CORS 
 
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
