@@ -1,3 +1,12 @@
+---
+title: Qari AI ASR
+emoji: 🎤
+colorFrom: green
+colorTo: blue
+sdk: docker
+pinned: false
+---
+
 # 🎤 Qari AI — Your Intelligent Tajweed & Quran Tutor
 
 > **Bridging the gap between ancient tradition and modern AI.** 
