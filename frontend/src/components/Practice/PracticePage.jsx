@@ -233,12 +233,12 @@ export default function PracticePage() {
   useEffect(() => {
     const hasSeen = localStorage.getItem('qari_welcome_tip_seen');
     if (!hasSeen) {
-      const showTimer = setTimeout(() => setShowWelcomeTip(true), 2000); 
+      const showTimer = setTimeout(() => setShowWelcomeTip(true), 2000);
       // Auto-dismiss after 6 seconds for a snappier, premium feel
       const dismissTimer = setTimeout(() => {
         localStorage.setItem('qari_welcome_tip_seen', 'true');
         setShowWelcomeTip(false);
-      }, 7000); 
+      }, 7000);
 
       return () => {
         clearTimeout(showTimer);
@@ -293,9 +293,6 @@ export default function PracticePage() {
     formData.append('reference_duration', effectiveRefDuration.toString()); // 🕒 Pass ref duration
 
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7576/ingest/f90dd0e0-036c-4373-9b72-19fc8b11d411', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'bc17f4' }, body: JSON.stringify({ sessionId: 'bc17f4', hypothesisId: 'H2', location: 'PracticePage.jsx:analyzeRecording', message: 'analyze preflight', data: { blobSize: recordedBlob?.size ?? null, blobType: recordedBlob?.type ?? null, wordCount: words.length, chapter: selectedChapter, ayah: selectedAyah, expectedLenChars: words.join(' ').length }, timestamp: Date.now() }) }).catch(() => { });
-      // #endregion
       const res = await fetch(API.ANALYZE, {
         method: 'POST',
         headers: {
@@ -305,23 +302,15 @@ export default function PracticePage() {
       });
       if (!res.ok) {
         const errText = await res.text();
-        // #region agent log
-        fetch('http://127.0.0.1:7576/ingest/f90dd0e0-036c-4373-9b72-19fc8b11d411', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'bc17f4' }, body: JSON.stringify({ sessionId: 'bc17f4', hypothesisId: 'H1', location: 'PracticePage.jsx:analyzeRecording', message: 'analyze http error', data: { status: res.status, bodyPreview: errText.slice(0, 400) }, timestamp: Date.now() }) }).catch(() => { });
-        // #endregion
         throw new Error('Analysis service error');
       }
       const data = await res.json();
-      // #region agent log
-      const wf = data.word_feedback;
-      const segs = data.word_segments;
-      fetch('http://127.0.0.1:7576/ingest/f90dd0e0-036c-4373-9b72-19fc8b11d411', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'bc17f4' }, body: JSON.stringify({ sessionId: 'bc17f4', hypothesisId: 'H3', location: 'PracticePage.jsx:analyzeRecording', message: 'analyze success shape', data: { score: data.score, hasRawText: Boolean(data.raw_text), rawTextLen: (data.raw_text || '').length, wordFeedbackLen: Array.isArray(wf) ? wf.length : -1, wordSegmentsLen: Array.isArray(segs) ? segs.length : -1, alignMismatch: Array.isArray(wf) && Array.isArray(segs) ? wf.length !== segs.length : null, apiError: data.error || null }, timestamp: Date.now() }) }).catch(() => { });
-      // #endregion
       setAnalysisResult(data);
       if (data.difficult_words) setDifficultWords(data.difficult_words);
+
+      // ✅ NEW: Track practice with audio content
+      trackPractice(selectedChapter, selectedAyah, data, recordedBlob);
     } catch (err) {
-      // #region agent log
-      fetch('http://127.0.0.1:7576/ingest/f90dd0e0-036c-4373-9b72-19fc8b11d411', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'bc17f4' }, body: JSON.stringify({ sessionId: 'bc17f4', hypothesisId: 'H1', location: 'PracticePage.jsx:analyzeRecording', message: 'analyze catch', data: { errMsg: String(err?.message || err) }, timestamp: Date.now() }) }).catch(() => { });
-      // #endregion
       setAnalysisError("Could not analyze recording. Please try again.");
       console.error(err);
     } finally {
@@ -330,26 +319,68 @@ export default function PracticePage() {
   };
 
   // ✅ Fixed ReferenceError: trackPractice
-  const trackPractice = (chapter, ayah) => {
+  const trackPractice = async (chapter, ayah, result, audioBlob = null) => {
     try {
       const today = new Date().toISOString().slice(0, 10);
+      const sessionId = Date.now();
+
+      // 1. Streak Tracker
       const dates = JSON.parse(localStorage.getItem('practice_dates') || '[]');
       if (!dates.includes(today)) {
         dates.push(today);
         localStorage.setItem('practice_dates', JSON.stringify(dates));
       }
+
+      // 2. Completion Tracker
       const key = `${chapter}:${ayah}`;
-      const ayahs = JSON.parse(localStorage.getItem('practiced_ayahs') || '[]');
-      if (!ayahs.includes(key)) {
-        ayahs.push(key);
-        localStorage.setItem('practiced_ayahs', JSON.stringify(ayahs));
+      const completed = JSON.parse(localStorage.getItem('completed_ayahs') || '[]');
+      if (!completed.includes(key)) {
+        completed.push(key);
+        localStorage.setItem('completed_ayahs', JSON.stringify(completed));
       }
-      const sessions = JSON.parse(localStorage.getItem('practice_sessions') || '{}');
-      sessions[key] = (sessions[key] || 0) + 1;
-      localStorage.setItem('practice_sessions', JSON.stringify(sessions));
-      console.log(`[Stats] Tracked practice for Surah ${chapter}, Ayah ${ayah}`);
+
+      // 3. Audio Vault (Store last 5 guest audio sessions locally)
+      if (audioBlob && !localStorage.getItem('user_access_token')) {
+        try {
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = () => {
+            const base64Audio = reader.result;
+            const vault = JSON.parse(localStorage.getItem('guest_audio_vault') || '{}');
+            vault[sessionId] = base64Audio;
+
+            // Keep vault small (last 5 sessions)
+            const keys = Object.keys(vault).sort();
+            if (keys.length > 5) delete vault[keys[0]];
+
+            localStorage.setItem('guest_audio_vault', JSON.stringify(vault));
+          };
+        } catch (e) { console.warn("Audio vault failed:", e); }
+      }
+
+      // 4. History List (Full Metrics for Dashboard)
+      const history = JSON.parse(localStorage.getItem('practice_history_list') || '[]');
+      const session = {
+        id: sessionId,
+        surah_number: parseInt(chapter),
+        ayah_number: parseInt(ayah),
+        score: Math.round(result.score || 0),
+        accuracy: Math.round(result.accuracy || 0),
+        tajweedAvg: Math.round(result.score || 0),
+        mistake_count: result.word_feedback?.filter(w => w.status === 'missing').length || 0,
+        total_words: result.word_feedback?.length || 0,
+        grade: result.grade || 'N/A',
+        raw_text: result.raw_text || "",
+        created_at: new Date().toISOString(),
+        weakestRule: result.word_feedback?.find(w => w.status !== 'correct') || null
+      };
+
+      history.push(session);
+      localStorage.setItem('practice_history_list', JSON.stringify(history.slice(-50)));
+
+      console.log(`[Guest Stats] Persisted: #${sessionId} (${result.score}%)`);
     } catch (e) {
-      console.warn("Failed to track practice stats:", e);
+      console.warn("Failed to track practice:", e);
     }
   };
 
@@ -1228,642 +1259,641 @@ export default function PracticePage() {
     setIsAutoPlayEnabled(false); // Ensure auto-advance stays off
   };
 
-const formatTime = (s) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+  const formatTime = (s) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-// ── WaveSurfer Visualizer Effect ──
-useEffect(() => {
-  if (!waveformRef.current || !recordedUrl || !analysisResult) return;
+  // ── WaveSurfer Visualizer Effect ──
+  useEffect(() => {
+    if (!waveformRef.current || !recordedUrl || !analysisResult) return;
 
-  if (wavesurferRef.current) {
-    wavesurferRef.current.destroy();
-  }
+    if (wavesurferRef.current) {
+      wavesurferRef.current.destroy();
+    }
 
-  const ws = WaveSurfer.create({
-    container: waveformRef.current,
-    waveColor: '#D1D5DB', // gray-300
-    progressColor: '#3B82F6', // blue-500
-    cursorColor: '#1E3A8A',
-    barWidth: 2,
-    barGap: 1,
-    barRadius: 2,
-    height: 80,
-    url: recordedUrl
-  });
+    const ws = WaveSurfer.create({
+      container: waveformRef.current,
+      waveColor: '#D1D5DB', // gray-300
+      progressColor: '#3B82F6', // blue-500
+      cursorColor: '#1E3A8A',
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 2,
+      height: 80,
+      url: recordedUrl
+    });
 
-  const wsRegions = ws.registerPlugin(RegionsPlugin.create());
+    const wsRegions = ws.registerPlugin(RegionsPlugin.create());
 
-  ws.on('ready', () => {
-    // Draw Word Segments
-    if (analysisResult.word_segments && analysisResult.word_feedback) {
-      analysisResult.word_feedback.forEach((w, i) => {
-        if (w.status !== 'missing' && analysisResult.word_segments[i]) {
-          const seg = analysisResult.word_segments[i];
-          const hasTajweed = w.tajweed && w.tajweed.some(t => t.severity === 'warning');
+    ws.on('ready', () => {
+      // Draw Word Segments
+      if (analysisResult.word_segments && analysisResult.word_feedback) {
+        analysisResult.word_feedback.forEach((w, i) => {
+          if (w.status !== 'missing' && analysisResult.word_segments[i]) {
+            const seg = analysisResult.word_segments[i];
+            const hasTajweed = w.tajweed && w.tajweed.some(t => t.severity === 'warning');
 
-          // Determine color
-          let color = 'rgba(16, 185, 129, 0.2)'; // green (correct)
-          if (w.status === 'partial') color = 'rgba(59, 130, 246, 0.2)'; // blue
-          if (hasTajweed) color = 'rgba(245, 158, 11, 0.3)'; // yellow
-          if (w.status === 'incorrect') color = 'rgba(239, 68, 68, 0.2)'; // red
+            // Determine color
+            let color = 'rgba(16, 185, 129, 0.2)'; // green (correct)
+            if (w.status === 'partial') color = 'rgba(59, 130, 246, 0.2)'; // blue
+            if (hasTajweed) color = 'rgba(245, 158, 11, 0.3)'; // yellow
+            if (w.status === 'incorrect') color = 'rgba(239, 68, 68, 0.2)'; // red
 
+            wsRegions.addRegion({
+              start: seg.start,
+              end: seg.end,
+              content: w.expected,
+              color: color,
+              drag: false,
+              resize: false
+            });
+          }
+        });
+      }
+
+      // Draw Pauses
+      if (analysisResult.pauses) {
+        analysisResult.pauses.forEach(p => {
           wsRegions.addRegion({
-            start: seg.start,
-            end: seg.end,
-            content: w.expected,
-            color: color,
+            start: p.start,
+            end: p.end,
+            content: '⏸️ Pause',
+            color: 'rgba(239, 68, 68, 0.3)', // Red
             drag: false,
             resize: false
           });
-        }
-      });
-    }
-
-    // Draw Pauses
-    if (analysisResult.pauses) {
-      analysisResult.pauses.forEach(p => {
-        wsRegions.addRegion({
-          start: p.start,
-          end: p.end,
-          content: '⏸️ Pause',
-          color: 'rgba(239, 68, 68, 0.3)', // Red
-          drag: false,
-          resize: false
         });
-      });
-    }
-  });
+      }
+    });
 
-  wavesurferRef.current = ws;
+    wavesurferRef.current = ws;
 
-  return () => {
-    if (wavesurferRef.current) {
-      wavesurferRef.current.destroy();
-      wavesurferRef.current = null;
-    }
-  };
-}, [recordedUrl, analysisResult]);
+    return () => {
+      if (wavesurferRef.current) {
+        wavesurferRef.current.destroy();
+        wavesurferRef.current = null;
+      }
+    };
+  }, [recordedUrl, analysisResult]);
 
 
-return (
-  <div className="flex flex-col items-center justify-center min-h-full p-1 sm:p-4 animate-fade-in overflow-y-auto w-full">
-    {/* ── Welcome Tip (Banner Style) ── */}
-    {showWelcomeTip && (
-      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm animate-in fade-in slide-in-from-top-6 duration-700 ease-out">
-        <div className="bg-white/80 backdrop-blur-xl border border-emerald-100 shadow-[0_12px_30px_-4px_rgba(16,185,129,0.15)] rounded-2xl p-3 flex items-center gap-3.5 relative overflow-hidden ring-1 ring-emerald-500/10">
-          <div className="absolute inset-0 bg-gradient-to-br from-emerald-50/40 via-transparent to-transparent pointer-events-none" />
-          
-          <div className="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-emerald-400 to-emerald-600 text-white rounded-xl flex items-center justify-center shadow-md shadow-emerald-200/50">
-            <AudioLines size={18} />
-          </div>
-          
-          <div className="flex-1">
-            <p className="text-[9px] font-black text-emerald-600 uppercase tracking-[0.2em] mb-0.5">Focus Mode</p>
-            <p className="text-slate-700 text-[11px] font-semibold leading-relaxed">
-              Noise-free environment for <span className="text-emerald-700/90">accurate Tajweed analysis</span>
-            </p>
-          </div>
+  return (
+    <div className="flex flex-col items-center justify-center min-h-full p-1 sm:p-4 animate-fade-in overflow-y-auto w-full">
+      {/* ── Welcome Tip (Banner Style) ── */}
+      {showWelcomeTip && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm animate-in fade-in slide-in-from-top-6 duration-700 ease-out">
+          <div className="bg-white/80 backdrop-blur-xl border border-emerald-100 shadow-[0_12px_30px_-4px_rgba(16,185,129,0.15)] rounded-2xl p-3 flex items-center gap-3.5 relative overflow-hidden ring-1 ring-emerald-500/10">
+            <div className="absolute inset-0 bg-gradient-to-br from-emerald-50/40 via-transparent to-transparent pointer-events-none" />
 
-          <button 
-            onClick={dismissWelcomeTip}
-            className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-            aria-label="Dismiss"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      </div>
-    )}
+            <div className="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-emerald-400 to-emerald-600 text-white rounded-xl flex items-center justify-center shadow-md shadow-emerald-200/50">
+              <AudioLines size={18} />
+            </div>
 
-    {/* ── Floating Background Overlays ── */}
-    {analysisResult && analysisResult.score >= 85 && <Confetti />}
-    <AdvancedNavigator
-      isNavigatorOpen={isNavigatorOpen}
-      setIsNavigatorOpen={setIsNavigatorOpen}
-      chapters={chapters}
-      selectedChapter={selectedChapter}
-      setSelectedChapter={setSelectedChapter}
-      selectedAyah={selectedAyah}
-      setSelectedAyah={setSelectedAyah}
-      surahSearch={surahSearch}
-      setSurahSearch={setSurahSearch}
-      verseSearch={verseSearch}
-      setVerseSearch={setVerseSearch}
-    />
-    <div className="w-full max-w-[42rem] bg-white/80 backdrop-blur-xl rounded-[1.5rem] sm:rounded-[2rem] shadow-2xl overflow-visible border border-white/40">
-
-      {/* Controls Header */}
-      <div className="p-3 sm:p-4 border-b border-gray-100 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 shadow-sm z-10 relative rounded-t-[1.5rem] sm:rounded-t-[2rem]">
-
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          {/* Navigation Buttons + Advanced Navigator Trigger */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handlePrevAyah}
-              className="p-1 bg-white border border-emerald-100 rounded-lg text-emerald-600 shadow-sm hover:bg-emerald-50 transition-all active:scale-90 disabled:opacity-30"
-              title="Previous Verse"
-              disabled={selectedChapter === 1 && selectedAyah === 1}
-            >
-              <ChevronLeft size={14} />
-            </button>
+            <div className="flex-1">
+              <p className="text-[9px] font-black text-emerald-600 uppercase tracking-[0.2em] mb-0.5">Focus Mode</p>
+              <p className="text-slate-700 text-[11px] font-semibold leading-relaxed">
+                Noise-free environment for <span className="text-emerald-700/90">accurate Tajweed analysis</span>
+              </p>
+            </div>
 
             <button
-              onClick={() => setIsNavigatorOpen(true)}
-              className="flex items-center gap-2 pl-3 pr-4 py-1.5 bg-white border border-emerald-100 rounded-xl shadow-sm hover:shadow-md hover:border-emerald-300 transition-all group"
+              onClick={dismissWelcomeTip}
+              className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+              aria-label="Dismiss"
             >
-              <div className="flex flex-col items-start leading-none">
-                <span className="text-[8px] font-black text-emerald-600 uppercase tracking-[0.14em] mb-0.5">Current Verse</span>
-                <span className="text-[10px] font-black text-slate-800">
-                  {chapters.length > 0
-                    ? (chapters.find(c => c.id === selectedChapter)?.name_simple || `Surah ${selectedChapter}`)
-                    : (isLoading ? 'Surah Loading...' : `Surah ${selectedChapter}`)} : {selectedAyah}
-                </span>
-              </div>
+              <X size={14} />
             </button>
-
-            <button
-              onClick={handleNextAyah}
-              className="p-1 bg-white border border-emerald-100 rounded-lg text-emerald-600 shadow-sm hover:bg-emerald-50 transition-all active:scale-90 disabled:opacity-30"
-              title="Next Verse"
-              disabled={selectedChapter === 114 && selectedAyah === chapters.find(c => c.id === 114)?.verses_count}
-            >
-              <ChevronRight size={14} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between sm:justify-start gap-2 bg-white/50 p-1.5 sm:p-0 rounded-lg sm:bg-transparent">
-          <span className="text-[8px] sm:text-[10px] font-bold text-gray-500 uppercase tracking-wider">Reciter:</span>
-          <select
-            className="bg-white border text-[11px] border-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 font-medium shadow-sm focus:ring-2 focus:ring-gray-500 focus:outline-none cursor-pointer flex-1 sm:w-auto"
-            value={selectedReciter}
-            onChange={(e) => setSelectedReciter(e.target.value)}
-          >
-            {RECITERS.map(reciter => (
-              <option key={reciter.id} value={reciter.id}>{reciter.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Invalid Verse Warning */}
-      {chapters.length > 0 && chapters.find(c => c.id === selectedChapter)?.verses_count < selectedAyah && (
-        <div className="mx-4 mb-5 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
-          <AlertCircle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-bold text-amber-900">Verse Not Found</p>
-            <p className="text-xs text-amber-700 mt-1">Surah {chapters.find(c => c.id === selectedChapter)?.name_simple} has only {chapters.find(c => c.id === selectedChapter)?.verses_count} verses. Adjusted to verse {chapters.find(c => c.id === selectedChapter)?.verses_count}.</p>
           </div>
         </div>
       )}
 
-      {/* Display Content */}
-      <div className="px-3 py-4 sm:px-5 sm:py-6 flex flex-col items-center space-y-4 sm:space-y-5 min-h-[240px] justify-center relative">
-        {isLoading ? (
-          <div className="flex flex-col items-center justify-center space-y-4 w-full">
-            <Loader2 className="animate-spin text-emerald-500" size={36} />
-            <p className="text-emerald-600/70 font-medium text-sm">Fetching Divine Words...</p>
+      {/* ── Floating Background Overlays ── */}
+      {analysisResult && analysisResult.score >= 85 && <Confetti />}
+      <AdvancedNavigator
+        isNavigatorOpen={isNavigatorOpen}
+        setIsNavigatorOpen={setIsNavigatorOpen}
+        chapters={chapters}
+        selectedChapter={selectedChapter}
+        setSelectedChapter={setSelectedChapter}
+        selectedAyah={selectedAyah}
+        setSelectedAyah={setSelectedAyah}
+        surahSearch={surahSearch}
+        setSurahSearch={setSurahSearch}
+        verseSearch={verseSearch}
+        setVerseSearch={setVerseSearch}
+      />
+      <div className="w-full max-w-[42rem] bg-white/80 backdrop-blur-xl rounded-[1.5rem] sm:rounded-[2rem] shadow-2xl overflow-visible border border-white/40">
+
+        {/* Controls Header */}
+        <div className="p-3 sm:p-4 border-b border-gray-100 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 shadow-sm z-10 relative rounded-t-[1.5rem] sm:rounded-t-[2rem]">
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* Navigation Buttons + Advanced Navigator Trigger */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handlePrevAyah}
+                className="p-1 bg-white border border-emerald-100 rounded-lg text-emerald-600 shadow-sm hover:bg-emerald-50 transition-all active:scale-90 disabled:opacity-30"
+                title="Previous Verse"
+                disabled={selectedChapter === 1 && selectedAyah === 1}
+              >
+                <ChevronLeft size={14} />
+              </button>
+
+              <button
+                onClick={() => setIsNavigatorOpen(true)}
+                className="flex items-center gap-2 pl-3 pr-4 py-1.5 bg-white border border-emerald-100 rounded-xl shadow-sm hover:shadow-md hover:border-emerald-300 transition-all group"
+              >
+                <div className="flex flex-col items-start leading-none">
+                  <span className="text-[8px] font-black text-emerald-600 uppercase tracking-[0.14em] mb-0.5">Current Verse</span>
+                  <span className="text-[10px] font-black text-slate-800">
+                    {chapters.length > 0
+                      ? (chapters.find(c => c.id === selectedChapter)?.name_simple || `Surah ${selectedChapter}`)
+                      : (isLoading ? 'Surah Loading...' : `Surah ${selectedChapter}`)} : {selectedAyah}
+                  </span>
+                </div>
+              </button>
+
+              <button
+                onClick={handleNextAyah}
+                className="p-1 bg-white border border-emerald-100 rounded-lg text-emerald-600 shadow-sm hover:bg-emerald-50 transition-all active:scale-90 disabled:opacity-30"
+                title="Next Verse"
+                disabled={selectedChapter === 114 && selectedAyah === chapters.find(c => c.id === 114)?.verses_count}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
-        ) : (
-          <>
-            {/* ── Arabic Verse ── */}
-            <div className="w-full relative flex flex-col items-center">
-              {/* Tajweed Legend — subtle corner icon */}
-              <div className="group absolute right-1 top-1 z-10">
-                <button className="text-gray-300 hover:text-emerald-500 hover:bg-emerald-50/80 rounded-lg p-1.5 transition-all">
-                  <Info size={14} />
-                </button>
-                <div className="absolute left-0 top-full mt-1 w-[210px] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-100 p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-[60] pointer-events-none group-hover:pointer-events-auto">
-                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-2">Tajweed Colors</p>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#9E9E9E]"></span><span className="text-[10px] font-semibold text-gray-600">Silent Letter</span></div>
-                    <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#F48FB1]"></span><span className="text-[10px] font-semibold text-gray-600">Normal Madd (2)</span></div>
-                    <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#FF9800]"></span><span className="text-[10px] font-semibold text-gray-600">Separated Madd (2/4/6)</span></div>
-                    <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#F06292]"></span><span className="text-[10px] font-semibold text-gray-600">Connected Madd (4,5)</span></div>
-                    <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#D32F2F]"></span><span className="text-[10px] font-semibold text-gray-600">Necessary Madd (6)</span></div>
-                    <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#4CAF50]"></span><span className="text-[10px] font-semibold text-gray-600">Ghunna/ikhfa’</span></div>
-                    <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#00BCD4]"></span><span className="text-[10px] font-semibold text-gray-600">Qalqala (Echo)</span></div>
-                    <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#6169da]"></span><span className="text-[10px] font-semibold text-gray-600">Tafkhim (Heavy)</span></div>
-                    <div className="border-t border-gray-100 mt-1.5 pt-1.5">
-                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter mb-1.5">Extended</p>
-                      <div className="grid grid-cols-1 gap-1.5">
-                        <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#21c54a]"></span><span className="text-[9px] font-medium text-gray-500">Idgham</span></div>
-                        <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#FDB927]"></span><span className="text-[9px] font-medium text-gray-500">Iqlab</span></div>
-                        <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#2196F3]"></span><span className="text-[9px] font-medium text-gray-500">Lam Shamsiyah</span></div>
-                        <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#3F51B5]"></span><span className="text-[9px] font-medium text-gray-500">Lam Qamariyah</span></div>
+
+          <div className="flex items-center justify-between sm:justify-start gap-2 bg-white/50 p-1.5 sm:p-0 rounded-lg sm:bg-transparent">
+            <span className="text-[8px] sm:text-[10px] font-bold text-gray-500 uppercase tracking-wider">Reciter:</span>
+            <select
+              className="bg-white border text-[11px] border-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 font-medium shadow-sm focus:ring-2 focus:ring-gray-500 focus:outline-none cursor-pointer flex-1 sm:w-auto"
+              value={selectedReciter}
+              onChange={(e) => setSelectedReciter(e.target.value)}
+            >
+              {RECITERS.map(reciter => (
+                <option key={reciter.id} value={reciter.id}>{reciter.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Invalid Verse Warning */}
+        {chapters.length > 0 && chapters.find(c => c.id === selectedChapter)?.verses_count < selectedAyah && (
+          <div className="mx-4 mb-5 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
+            <AlertCircle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-amber-900">Verse Not Found</p>
+              <p className="text-xs text-amber-700 mt-1">Surah {chapters.find(c => c.id === selectedChapter)?.name_simple} has only {chapters.find(c => c.id === selectedChapter)?.verses_count} verses. Adjusted to verse {chapters.find(c => c.id === selectedChapter)?.verses_count}.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Display Content */}
+        <div className="px-3 py-4 sm:px-5 sm:py-6 flex flex-col items-center space-y-4 sm:space-y-5 min-h-[240px] justify-center relative">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center space-y-4 w-full">
+              <Loader2 className="animate-spin text-emerald-500" size={36} />
+              <p className="text-emerald-600/70 font-medium text-sm">Fetching Divine Words...</p>
+            </div>
+          ) : (
+            <>
+              {/* ── Arabic Verse ── */}
+              <div className="w-full relative flex flex-col items-center">
+                {/* Tajweed Legend — subtle corner icon */}
+                <div className="group absolute right-1 top-1 z-10">
+                  <button className="text-gray-300 hover:text-emerald-500 hover:bg-emerald-50/80 rounded-lg p-1.5 transition-all">
+                    <Info size={14} />
+                  </button>
+                  <div className="absolute left-0 top-full mt-1 w-[210px] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-100 p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-[60] pointer-events-none group-hover:pointer-events-auto">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-2">Tajweed Colors</p>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#9E9E9E]"></span><span className="text-[10px] font-semibold text-gray-600">Silent Letter</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#F48FB1]"></span><span className="text-[10px] font-semibold text-gray-600">Normal Madd (2)</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#FF9800]"></span><span className="text-[10px] font-semibold text-gray-600">Separated Madd (2/4/6)</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#F06292]"></span><span className="text-[10px] font-semibold text-gray-600">Connected Madd (4,5)</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#D32F2F]"></span><span className="text-[10px] font-semibold text-gray-600">Necessary Madd (6)</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#4CAF50]"></span><span className="text-[10px] font-semibold text-gray-600">Ghunna/ikhfa’</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#00BCD4]"></span><span className="text-[10px] font-semibold text-gray-600">Qalqala (Echo)</span></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#6169da]"></span><span className="text-[10px] font-semibold text-gray-600">Tafkhim (Heavy)</span></div>
+                      <div className="border-t border-gray-100 mt-1.5 pt-1.5">
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter mb-1.5">Extended</p>
+                        <div className="grid grid-cols-1 gap-1.5">
+                          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#21c54a]"></span><span className="text-[9px] font-medium text-gray-500">Idgham</span></div>
+                          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#FDB927]"></span><span className="text-[9px] font-medium text-gray-500">Iqlab</span></div>
+                          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#2196F3]"></span><span className="text-[9px] font-medium text-gray-500">Lam Shamsiyah</span></div>
+                          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#3F51B5]"></span><span className="text-[9px] font-medium text-gray-500">Lam Qamariyah</span></div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                <div className={`w-full flex flex-col items-center p-3 sm:p-4 rounded-2xl transition-all duration-700 ${isRecording ? 'bg-rose-50/30' : ''}`}>
+                  <h2
+                    className={`text-[1.4rem] sm:text-[1.8rem] font-arabic drop-shadow-sm leading-[1.95] sm:leading-[1.7] text-center flex flex-wrap justify-center gap-x-2 gap-y-2 sm:gap-y-2.5 transition-all duration-700 ${isPlaying ? 'text-emerald-700' : 'text-slate-800'}`}
+                    style={{ fontWeight: 550 }}
+                    dir="rtl"
+                  >
+                    {verseData?.words?.map((w, i) => {
+                      const isDiff = difficultWords.includes(i);
+                      const prevWord = i > 0 ? verseData.words[i - 1] : null;
+                      const precedingVowel = prevWord ? getLastVowel(prevWord.text_uthmani) : null;
+                      const tajweedText = w.verse_tajweed || w.text_uthmani_tajweed || w.text_uthmani || '';
+
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => handleWordClick(w, i)}
+                          className={`relative transition-all hover:scale-[1.02] active:scale-95 focus:outline-none ${focusedWord?.index === i ? 'text-emerald-500 scale-[1.02]' : ''}`}
+                        >
+                          <span dangerouslySetInnerHTML={{ __html: renderTajweed(stripAyahMarkers(tajweedText), precedingVowel) }} />
+                          {isDiff && (
+                            <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)] animate-pulse"></span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    <AyahOrnament number={verseData?.verse_number || selectedAyah} />
+                  </h2>
+                </div>
               </div>
 
-              <div className={`w-full flex flex-col items-center p-3 sm:p-4 rounded-2xl transition-all duration-700 ${isRecording ? 'bg-rose-50/30' : ''}`}>
-                <h2
-                  className={`text-[1.4rem] sm:text-[1.8rem] font-arabic drop-shadow-sm leading-[1.95] sm:leading-[1.7] text-center flex flex-wrap justify-center gap-x-2 gap-y-2 sm:gap-y-2.5 transition-all duration-700 ${isPlaying ? 'text-emerald-700' : 'text-slate-800'}`}
-                  style={{ fontWeight: 550 }}
-                  dir="rtl"
-                >
-                  {verseData?.words?.map((w, i) => {
-                    const isDiff = difficultWords.includes(i);
-                    const prevWord = i > 0 ? verseData.words[i - 1] : null;
-                    const precedingVowel = prevWord ? getLastVowel(prevWord.text_uthmani) : null;
-                    const tajweedText = w.verse_tajweed || w.text_uthmani_tajweed || w.text_uthmani || '';
-
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => handleWordClick(w, i)}
-                        className={`relative transition-all hover:scale-[1.02] active:scale-95 focus:outline-none ${focusedWord?.index === i ? 'text-emerald-500 scale-[1.02]' : ''}`}
-                      >
-                        <span dangerouslySetInnerHTML={{ __html: renderTajweed(stripAyahMarkers(tajweedText), precedingVowel) }} />
-                        {isDiff && (
-                          <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)] animate-pulse"></span>
-                        )}
-                      </button>
-                    );
-                  })}
-                  <AyahOrnament number={verseData?.verse_number || selectedAyah} />
-                </h2>
-              </div>
-            </div>
-
-            {/* ── Action Buttons ── */}
-            <div className="w-full max-w-lg mx-auto flex flex-col items-center gap-2 mt-2 sm:mt-4 px-3">
-              {/* Pre-recording: Record (primary) + Listen (secondary) */}
-              {!isRecording && !recordedBlob && (
-                <>
-                  <button
-                    onClick={startRecording}
-                    disabled={isPlaying}
-                    className={`w-full max-w-xs mx-auto flex items-center justify-center gap-2.5 px-5 py-2 bg-emerald-500 text-white rounded-lg shadow-[0_0_20px_rgba(16,185,129,0.25)] hover:bg-emerald-600 hover:scale-[1.02] transition-all duration-200 active:scale-[0.98] font-semibold text-sm uppercase tracking-[0.12em] group ${isPlaying ? 'opacity-40 cursor-not-allowed' : 'animate-pulse'}`}
-                    style={{ animationDuration: '3s' }}
-                  >
-                    <Mic size={16} className="group-hover:scale-110 transition-transform" />
-                    Record
-                  </button>
-                  <button
-                    onClick={togglePlay}
-                    disabled={isRecording}
-                    className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-bold text-[11px] ${isPlaying ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'} ${isRecording ? 'opacity-40 cursor-not-allowed disabled:hover:scale-100' : ''}`}
-                  >
-                    <Volume2 size={14} />
-                    {isPlaying ? '⏸ Pause Reference' : '▶ Listen Reference'}
-                  </button>
-                </>
-              )}
-
-              {/* Recording In Progress */}
-              {isRecording && (
-                <button
-                  onClick={stopRecording}
-                  className="w-full max-w-xs mx-auto flex items-center justify-center gap-2.5 px-5 py-2 bg-gradient-to-b from-rose-500 to-red-600 text-white rounded-lg shadow-md shadow-red-200/50 transition-all active:scale-[0.98]"
-                >
-                  <span className="relative flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
-                  </span>
-                  <span className="text-base font-mono font-bold">{formatTime(recordingTime)}</span>
-                  <span className="font-black text-sm uppercase tracking-[0.12em]">Stop</span>
-                </button>
-              )}
-
-              {/* Recorded — Playback + Analyze Controls */}
-              {!isRecording && recordedBlob && (
-                <div className="w-full flex flex-col gap-3">
-                  <div className="grid grid-cols-[1fr_1fr_auto] gap-2 w-full max-w-md mx-auto">
+              {/* ── Action Buttons ── */}
+              <div className="w-full max-w-lg mx-auto flex flex-col items-center gap-2 mt-2 sm:mt-4 px-3">
+                {/* Pre-recording: Record (primary) + Listen (secondary) */}
+                {!isRecording && !recordedBlob && (
+                  <>
                     <button
-                      onClick={isPlayingRecording ? pauseRecording : playRecording}
-                      className="h-8 flex items-center justify-center gap-1.5 px-2.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100/80 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-black text-[9px] uppercase tracking-[0.11em]"
+                      onClick={startRecording}
+                      disabled={isPlaying}
+                      className={`w-full max-w-xs mx-auto flex items-center justify-center gap-2.5 px-5 py-2 bg-emerald-500 text-white rounded-lg shadow-[0_0_20px_rgba(16,185,129,0.25)] hover:bg-emerald-600 hover:scale-[1.02] transition-all duration-200 active:scale-[0.98] font-semibold text-sm uppercase tracking-[0.12em] group ${isPlaying ? 'opacity-40 cursor-not-allowed' : 'animate-pulse'}`}
+                      style={{ animationDuration: '3s' }}
+                    >
+                      <Mic size={16} className="group-hover:scale-110 transition-transform" />
+                      Record
+                    </button>
+                    <button
+                      onClick={togglePlay}
+                      disabled={isRecording}
+                      className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-bold text-[11px] ${isPlaying ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'} ${isRecording ? 'opacity-40 cursor-not-allowed disabled:hover:scale-100' : ''}`}
+                    >
+                      <Volume2 size={14} />
+                      {isPlaying ? '⏸ Pause Reference' : '▶ Listen Reference'}
+                    </button>
+                  </>
+                )}
+
+                {/* Recording In Progress */}
+                {isRecording && (
+                  <button
+                    onClick={stopRecording}
+                    className="w-full max-w-xs mx-auto flex items-center justify-center gap-2.5 px-5 py-2 bg-gradient-to-b from-rose-500 to-red-600 text-white rounded-lg shadow-md shadow-red-200/50 transition-all active:scale-[0.98]"
+                  >
+                    <span className="relative flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+                    </span>
+                    <span className="text-base font-mono font-bold">{formatTime(recordingTime)}</span>
+                    <span className="font-black text-sm uppercase tracking-[0.12em]">Stop</span>
+                  </button>
+                )}
+
+                {/* Recorded — Playback + Analyze Controls */}
+                {!isRecording && recordedBlob && (
+                  <div className="w-full flex flex-col gap-3">
+                    <div className="grid grid-cols-[1fr_1fr_auto] gap-2 w-full max-w-md mx-auto">
+                      <button
+                        onClick={isPlayingRecording ? pauseRecording : playRecording}
+                        className="h-8 flex items-center justify-center gap-1.5 px-2.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100/80 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-black text-[9px] uppercase tracking-[0.11em]"
+                      >
+                        <Volume2 size={12} />
+                        {isPlayingRecording ? 'Pause' : 'My Recording'}
+                      </button>
+                      <button
+                        onClick={analyzeRecording}
+                        disabled={isAnalyzing}
+                        className="h-8 flex items-center justify-center gap-1.5 px-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-lg shadow-[0_0_20px_rgba(139,92,246,0.25)] hover:from-violet-600 hover:to-purple-700 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-black text-[9px] uppercase tracking-[0.11em] disabled:opacity-60 disabled:hover:scale-100"
+                      >
+                        {isAnalyzing ? <Loader2 size={10} className="animate-spin" /> : <BarChart3 size={12} />}
+                        {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+                      </button>
+                      <button
+                        onClick={() => { setRecordedBlob(null); setRecordedUrl(null); setAnalysisResult(null); }}
+                        className="h-8 w-8 flex items-center justify-center bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100/80 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
+                        title="Re-record"
+                      >
+                        <RefreshCw size={12} />
+                      </button>
+                    </div>
+                    {!analysisResult && !isAnalyzing && (
+                      <span className="text-[8px] text-emerald-600 font-black uppercase tracking-[0.14em] text-center px-2.5 py-0.5 bg-emerald-50 rounded-full self-center">✓ Recording Saved</span>
+                    )}
+                    <button
+                      onClick={togglePlay}
+                      className={`h-8 w-full max-w-[10rem] flex items-center justify-center gap-1.5 px-3 rounded-lg hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-black text-[9px] uppercase tracking-[0.11em] mx-auto ${isPlaying ? 'bg-amber-50 text-amber-700' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}
                     >
                       <Volume2 size={12} />
-                      {isPlayingRecording ? 'Pause' : 'My Recording'}
-                    </button>
-                    <button
-                      onClick={analyzeRecording}
-                      disabled={isAnalyzing}
-                      className="h-8 flex items-center justify-center gap-1.5 px-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-lg shadow-[0_0_20px_rgba(139,92,246,0.25)] hover:from-violet-600 hover:to-purple-700 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-black text-[9px] uppercase tracking-[0.11em] disabled:opacity-60 disabled:hover:scale-100"
-                    >
-                      {isAnalyzing ? <Loader2 size={10} className="animate-spin" /> : <BarChart3 size={12} />}
-                      {isAnalyzing ? 'Analyzing...' : 'Analyze'}
-                    </button>
-                    <button
-                      onClick={() => { setRecordedBlob(null); setRecordedUrl(null); setAnalysisResult(null); }}
-                      className="h-8 w-8 flex items-center justify-center bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100/80 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
-                      title="Re-record"
-                    >
-                      <RefreshCw size={12} />
+                      {isPlaying ? '⏸ Pause Reference' : '▶ Listen Reference'}
                     </button>
                   </div>
-                  {!analysisResult && !isAnalyzing && (
-                    <span className="text-[8px] text-emerald-600 font-black uppercase tracking-[0.14em] text-center px-2.5 py-0.5 bg-emerald-50 rounded-full self-center">✓ Recording Saved</span>
-                  )}
-                  <button
-                    onClick={togglePlay}
-                    className={`h-8 w-full max-w-[10rem] flex items-center justify-center gap-1.5 px-3 rounded-lg hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 font-black text-[9px] uppercase tracking-[0.11em] mx-auto ${isPlaying ? 'bg-amber-50 text-amber-700' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}
-                  >
-                    <Volume2 size={12} />
-                    {isPlaying ? '⏸ Pause Reference' : '▶ Listen Reference'}
-                  </button>
+                )}
+              </div>
+
+              {/* ── Verse Meaning (subdued) ── */}
+              <div className={`w-full max-w-xl mx-auto mt-4 sm:mt-5 px-3`}>
+                <div className={`p-3 sm:p-4 rounded-lg border-l-4 transition-all duration-500 ${isPlaying ? 'border-emerald-400 bg-emerald-50/40' : 'border-gray-200 bg-gray-50/40'}`}>
+                  <p
+                    className={`text-center text-[11px] sm:text-xs font-medium leading-relaxed italic transition-colors duration-500 ${isPlaying ? 'text-emerald-800' : 'text-gray-500'}`}
+                    dangerouslySetInnerHTML={{ __html: `"${translationText}"` }}
+                  />
+                </div>
+              </div>
+
+              {/* Analysis Error */}
+              {analysisError && (
+                <div className="w-full max-w-xl p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 mt-3">
+                  <AlertCircle size={18} className="text-red-500 mt-0.5 flex-shrink-0" />
+                  <p className="text-red-700 text-xs font-medium">{analysisError}</p>
                 </div>
               )}
-            </div>
 
-            {/* ── Verse Meaning (subdued) ── */}
-            <div className={`w-full max-w-xl mx-auto mt-4 sm:mt-5 px-3`}>
-              <div className={`p-3 sm:p-4 rounded-lg border-l-4 transition-all duration-500 ${isPlaying ? 'border-emerald-400 bg-emerald-50/40' : 'border-gray-200 bg-gray-50/40'}`}>
-                <p
-                  className={`text-center text-[11px] sm:text-xs font-medium leading-relaxed italic transition-colors duration-500 ${isPlaying ? 'text-emerald-800' : 'text-gray-500'}`}
-                  dangerouslySetInnerHTML={{ __html: `"${translationText}"` }}
-                />
-              </div>
-            </div>
+              {/* Analysis Results - Full Report */}
+              {analysisResult && (
+                <div className="w-full max-w-xl mt-4 space-y-3 animate-fade-in">
 
-            {/* Analysis Error */}
-            {analysisError && (
-              <div className="w-full max-w-xl p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 mt-3">
-                <AlertCircle size={18} className="text-red-500 mt-0.5 flex-shrink-0" />
-                <p className="text-red-700 text-xs font-medium">{analysisError}</p>
-              </div>
-            )}
-
-            {/* Analysis Results - Full Report */}
-            {analysisResult && (
-              <div className="w-full max-w-xl mt-4 space-y-3 animate-fade-in">
-
-                {/* ── Score Header ── */}
-                <div className={`p-4 rounded-xl border-2 shadow-lg text-center ${analysisResult.color === 'green' ? 'bg-gradient-to-br from-emerald-50 to-green-50 border-emerald-300' :
-                  analysisResult.color === 'blue' ? 'bg-gradient-to-br from-blue-50 to-sky-50 border-blue-300' :
-                    analysisResult.color === 'amber' ? 'bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-300' :
-                      'bg-gradient-to-br from-red-50 to-rose-50 border-red-300'
-                  }`}>
-                  <p className={`text-4xl font-black mb-1 ${analysisResult.color === 'green' ? 'text-emerald-600' :
-                    analysisResult.color === 'blue' ? 'text-blue-600' :
-                      analysisResult.color === 'amber' ? 'text-amber-600' : 'text-red-600'
-                    }`}>{analysisResult.score}<span className="text-lg text-gray-400 font-bold"> / 100</span></p>
-                  <p className={`text-sm font-bold mb-1.5 ${analysisResult.color === 'green' ? 'text-emerald-700' :
-                    analysisResult.color === 'blue' ? 'text-blue-700' :
-                      analysisResult.color === 'amber' ? 'text-amber-700' : 'text-red-700'
-                    }`}>{analysisResult.grade}</p>
-                  <p className="text-gray-600 text-xs font-medium italic">"{analysisResult.summary}"</p>
-                </div>
-
-                {/* ── Metric Cards ── */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <div className="relative overflow-hidden bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] p-3 flex flex-col items-center justify-center gap-2 sm:gap-2.5 group hover:-translate-y-0.5 transition-all duration-300">
-                    <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="p-1.5 bg-emerald-50 rounded-lg text-emerald-500"><Target size={15} /></div>
-                      <div className="flex flex-col items-center">
-                        <p className="text-lg font-black text-gray-800 leading-none">{analysisResult.accuracy}%</p>
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest mt-1">Accuracy</p>
-                      </div>
-                    </div>
+                  {/* ── Score Header ── */}
+                  <div className={`p-4 rounded-xl border-2 shadow-lg text-center ${analysisResult.color === 'green' ? 'bg-gradient-to-br from-emerald-50 to-green-50 border-emerald-300' :
+                    analysisResult.color === 'blue' ? 'bg-gradient-to-br from-blue-50 to-sky-50 border-blue-300' :
+                      analysisResult.color === 'amber' ? 'bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-300' :
+                        'bg-gradient-to-br from-red-50 to-rose-50 border-red-300'
+                    }`}>
+                    <p className={`text-4xl font-black mb-1 ${analysisResult.color === 'green' ? 'text-emerald-600' :
+                      analysisResult.color === 'blue' ? 'text-blue-600' :
+                        analysisResult.color === 'amber' ? 'text-amber-600' : 'text-red-600'
+                      }`}>{analysisResult.score}<span className="text-lg text-gray-400 font-bold"> / 100</span></p>
+                    <p className={`text-sm font-bold mb-1.5 ${analysisResult.color === 'green' ? 'text-emerald-700' :
+                      analysisResult.color === 'blue' ? 'text-blue-700' :
+                        analysisResult.color === 'amber' ? 'text-amber-700' : 'text-red-700'
+                      }`}>{analysisResult.grade}</p>
+                    <p className="text-gray-600 text-xs font-medium italic">"{analysisResult.summary}"</p>
                   </div>
-                  <div className="relative overflow-hidden bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] p-3 flex flex-col items-center justify-center gap-2 sm:gap-2.5 group hover:-translate-y-0.5 transition-all duration-300">
-                    <div className="absolute top-0 left-0 right-0 h-1 bg-blue-500" />
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="p-1.5 bg-blue-50 rounded-lg text-blue-500"><Clock size={15} /></div>
-                      <div className="flex flex-col items-center">
-                        <p className="text-lg font-black text-gray-800 leading-none">{analysisResult.timing}%</p>
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest mt-1">Timing</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="relative overflow-hidden bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] p-3 flex flex-col items-center justify-center gap-2 sm:gap-2.5 group hover:-translate-y-0.5 transition-all duration-300">
-                    <div className="absolute top-0 left-0 right-0 h-1 bg-purple-500" />
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="p-1.5 bg-purple-50 rounded-lg text-purple-500"><AudioLines size={15} /></div>
-                      <div className="flex flex-col items-center">
-                        <p className="text-lg font-black text-gray-800 leading-none">{analysisResult.integrity}%</p>
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest mt-1">Tajweed</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
 
-                {/* ── Word-by-Word Highlight ── */}
-                {analysisResult.word_feedback && analysisResult.word_feedback.length > 0 && (
-                  <div className="bg-white rounded-2xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border-transparent p-4 sm:p-5">
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.24em] mb-5 text-center">Visual Timeline</p>
-                    <div className="flex flex-wrap gap-3 justify-center animate-in fade-in duration-500" dir="rtl">
-                      {analysisResult.word_feedback.map((w, i) => {
-                        const hasTajweed = w.tajweed && w.tajweed.some(t => t.severity === 'warning');
-                        const bgColor = w.status === 'correct' && !hasTajweed ? 'bg-emerald-50 text-emerald-800' :
-                          w.status === 'partial' ? 'bg-blue-50 text-blue-800' :
-                            hasTajweed ? 'bg-amber-50 text-amber-800' :
-                              w.status === 'missing' ? 'bg-red-50 text-red-800' :
-                                'bg-red-50 text-red-800';
-                        const tooltip = w.status === 'missing' ? 'Missing word' :
-                          w.status === 'incorrect' ? `Heard: ${w.got || '?'}` :
-                            hasTajweed ? w.tajweed.filter(t => t.severity === 'warning').map(t => t.message).join('; ') :
-                              w.status === 'partial' ? `Partial (${w.similarity}%)` : 'Correct ✓';
-                        return (
-                          <span key={i}
-                            className={`group relative px-2.5 py-1 rounded-xl text-xs font-bold cursor-default transition-all duration-200 hover:scale-[1.02] hover:shadow-sm ${bgColor}`}
-                            title={tooltip}
-                          >
-                            {w.expected}
-                            <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[9px] px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-                              {tooltip}
-                            </span>
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <div className="flex gap-3 justify-center mt-5 text-[8px] font-medium text-slate-400 uppercase tracking-[0.14em]">
-                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm"></span> Correct</span>
-                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-400 shadow-sm"></span> Partial</span>
-                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400 shadow-sm"></span> Tajweed</span>
-                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-400 shadow-sm"></span> Missing</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Feedback List ── */}
-                {analysisResult.feedback && analysisResult.feedback.length > 0 && (
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-2.5">
-                    <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mb-2.5">Detailed Feedback</p>
-                    <div className="space-y-1.5">
-                      {analysisResult.feedback.map((f, i) => (
-                        <div key={i} className={`flex items-start gap-2.5 p-2 rounded-lg text-[11.5px] font-medium border-l-2 ${
-                          f.type === 'error' ? 'bg-red-50/50 border-red-400 text-red-700' :
-                          f.type === 'warning' ? 'bg-amber-50/50 border-amber-400 text-amber-700' :
-                          'bg-blue-50/50 border-blue-400 text-blue-700'
-                        }`}>
-                          <span className="text-xs flex-shrink-0 mt-0.5">{f.icon}</span>
-                          <span className="leading-snug">{f.message}</span>
+                  {/* ── Metric Cards ── */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="relative overflow-hidden bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] p-3 flex flex-col items-center justify-center gap-2 sm:gap-2.5 group hover:-translate-y-0.5 transition-all duration-300">
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="p-1.5 bg-emerald-50 rounded-lg text-emerald-500"><Target size={15} /></div>
+                        <div className="flex flex-col items-center">
+                          <p className="text-lg font-black text-gray-800 leading-none">{analysisResult.accuracy}%</p>
+                          <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest mt-1">Accuracy</p>
                         </div>
+                      </div>
+                    </div>
+                    <div className="relative overflow-hidden bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] p-3 flex flex-col items-center justify-center gap-2 sm:gap-2.5 group hover:-translate-y-0.5 transition-all duration-300">
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-blue-500" />
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="p-1.5 bg-blue-50 rounded-lg text-blue-500"><Clock size={15} /></div>
+                        <div className="flex flex-col items-center">
+                          <p className="text-lg font-black text-gray-800 leading-none">{analysisResult.timing}%</p>
+                          <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest mt-1">Timing</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="relative overflow-hidden bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] p-3 flex flex-col items-center justify-center gap-2 sm:gap-2.5 group hover:-translate-y-0.5 transition-all duration-300">
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-purple-500" />
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="p-1.5 bg-purple-50 rounded-lg text-purple-500"><AudioLines size={15} /></div>
+                        <div className="flex flex-col items-center">
+                          <p className="text-lg font-black text-gray-800 leading-none">{analysisResult.integrity}%</p>
+                          <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest mt-1">Tajweed</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Word-by-Word Highlight ── */}
+                  {analysisResult.word_feedback && analysisResult.word_feedback.length > 0 && (
+                    <div className="bg-white rounded-2xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border-transparent p-4 sm:p-5">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.24em] mb-5 text-center">Visual Timeline</p>
+                      <div className="flex flex-wrap gap-3 justify-center animate-in fade-in duration-500" dir="rtl">
+                        {analysisResult.word_feedback.map((w, i) => {
+                          const hasTajweed = w.tajweed && w.tajweed.some(t => t.severity === 'warning');
+                          const bgColor = w.status === 'correct' && !hasTajweed ? 'bg-emerald-50 text-emerald-800' :
+                            w.status === 'partial' ? 'bg-blue-50 text-blue-800' :
+                              hasTajweed ? 'bg-amber-50 text-amber-800' :
+                                w.status === 'missing' ? 'bg-red-50 text-red-800' :
+                                  'bg-red-50 text-red-800';
+                          const tooltip = w.status === 'missing' ? 'Missing word' :
+                            w.status === 'incorrect' ? `Heard: ${w.got || '?'}` :
+                              hasTajweed ? w.tajweed.filter(t => t.severity === 'warning').map(t => t.message).join('; ') :
+                                w.status === 'partial' ? `Partial (${w.similarity}%)` : 'Correct ✓';
+                          return (
+                            <span key={i}
+                              className={`group relative px-2.5 py-1 rounded-xl text-xs font-bold cursor-default transition-all duration-200 hover:scale-[1.02] hover:shadow-sm ${bgColor}`}
+                              title={tooltip}
+                            >
+                              {w.expected}
+                              <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[9px] px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+                                {tooltip}
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <div className="flex gap-3 justify-center mt-5 text-[8px] font-medium text-slate-400 uppercase tracking-[0.14em]">
+                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm"></span> Correct</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-400 shadow-sm"></span> Partial</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400 shadow-sm"></span> Tajweed</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-400 shadow-sm"></span> Missing</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Feedback List ── */}
+                  {analysisResult.feedback && analysisResult.feedback.length > 0 && (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-2.5">
+                      <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mb-2.5">Detailed Feedback</p>
+                      <div className="space-y-1.5">
+                        {analysisResult.feedback.map((f, i) => (
+                          <div key={i} className={`flex items-start gap-2.5 p-2 rounded-lg text-[11.5px] font-medium border-l-2 ${f.type === 'error' ? 'bg-red-50/50 border-red-400 text-red-700' :
+                              f.type === 'warning' ? 'bg-amber-50/50 border-amber-400 text-amber-700' :
+                                'bg-blue-50/50 border-blue-400 text-blue-700'
+                            }`}>
+                            <span className="text-xs flex-shrink-0 mt-0.5">{f.icon}</span>
+                            <span className="leading-snug">{f.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Suggestions ── */}
+                  {analysisResult.suggestions && analysisResult.suggestions.length > 0 && (
+                    <div className="bg-gray-50 rounded-xl border border-gray-200 p-3.5">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">💡 Suggestions</p>
+                      {analysisResult.suggestions.map((s, i) => (
+                        <p key={i} className="text-gray-600 text-xs font-medium leading-relaxed">• {s}</p>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* ── Suggestions ── */}
-                {analysisResult.suggestions && analysisResult.suggestions.length > 0 && (
-                  <div className="bg-gray-50 rounded-xl border border-gray-200 p-3.5">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">💡 Suggestions</p>
-                    {analysisResult.suggestions.map((s, i) => (
-                      <p key={i} className="text-gray-600 text-xs font-medium leading-relaxed">• {s}</p>
-                    ))}
-                  </div>
-                )}
+                  {/* ── Expert Insight Engine ── */}
+                  {(() => {
+                    const problematicWords = analysisResult?.word_feedback?.filter(w => w.status !== 'correct') || [];
+                    const sources = problematicWords.length > 0 ? problematicWords : (Array.isArray(difficultWords) ? difficultWords : []);
 
-                {/* ── Expert Insight Engine ── */}
-                {(() => {
-                  const problematicWords = analysisResult?.word_feedback?.filter(w => w.status !== 'correct') || [];
-                  const sources = problematicWords.length > 0 ? problematicWords : (Array.isArray(difficultWords) ? difficultWords : []);
-                  
-                  if (sources.length === 0 || (analysisResult.score || 0) < 20) return null;
-                  
-                  const PRIORITY_LETTERS = ['ع', 'ح', 'خ', 'ض', 'ط', 'ظ', 'غ', 'ق', 'ص'];
-                  const allMatches = Object.keys(MAKHRAJ_TIPS || {}).filter(letter => 
-                    sources.some(dw => {
-                      const wordText = (typeof dw === 'string' ? dw : dw.expected || dw.text || '');
-                      return wordText.includes(letter);
-                    })
-                  );
+                    if (sources.length === 0 || (analysisResult.score || 0) < 20) return null;
 
-                  if (allMatches.length === 0) return null;
+                    const PRIORITY_LETTERS = ['ع', 'ح', 'خ', 'ض', 'ط', 'ظ', 'غ', 'ق', 'ص'];
+                    const allMatches = Object.keys(MAKHRAJ_TIPS || {}).filter(letter =>
+                      sources.some(dw => {
+                        const wordText = (typeof dw === 'string' ? dw : dw.expected || dw.text || '');
+                        return wordText.includes(letter);
+                      })
+                    );
 
-                  const bestTipKeys = allMatches.sort((a, b) => {
-                    const aPri = PRIORITY_LETTERS.indexOf(a);
-                    const bPri = PRIORITY_LETTERS.indexOf(b);
-                    if (aPri !== -1 && bPri === -1) return -1;
-                    if (aPri === -1 && bPri !== -1) return 1;
-                    return 0; 
-                  }).slice(0, 3);
+                    if (allMatches.length === 0) return null;
 
-                  return (
-                    <div className="bg-white rounded-xl p-3 shadow-sm border border-emerald-100 border-l-4 border-l-emerald-400 relative overflow-hidden">
-                      <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-1.5 grayscale opacity-70">
-                          <BookOpen size={12} className="text-emerald-600" />
-                          <p className="text-[8px] font-bold text-emerald-700 uppercase tracking-widest">Qari's Advice</p>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          {bestTipKeys.map((key, idx) => (
-                            <div key={key} className="flex items-start gap-2.5">
+                    const bestTipKeys = allMatches.sort((a, b) => {
+                      const aPri = PRIORITY_LETTERS.indexOf(a);
+                      const bPri = PRIORITY_LETTERS.indexOf(b);
+                      if (aPri !== -1 && bPri === -1) return -1;
+                      if (aPri === -1 && bPri !== -1) return 1;
+                      return 0;
+                    }).slice(0, 3);
+
+                    return (
+                      <div className="bg-white rounded-xl p-3 shadow-sm border border-emerald-100 border-l-4 border-l-emerald-400 relative overflow-hidden">
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center gap-1.5 grayscale opacity-70">
+                            <BookOpen size={12} className="text-emerald-600" />
+                            <p className="text-[8px] font-bold text-emerald-700 uppercase tracking-widest">Qari's Advice</p>
+                          </div>
+
+                          <div className="space-y-2">
+                            {bestTipKeys.map((key, idx) => (
+                              <div key={key} className="flex items-start gap-2.5">
                                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-100 border border-emerald-300 mt-1 flex-shrink-0" />
                                 <p className="text-[11.5px] font-semibold leading-tight text-gray-700/90 italic">
                                   {MAKHRAJ_TIPS[key]}
                                 </p>
-                            </div>
-                          ))}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
+                    );
+                  })()}
+
+                  {/* ── Audio Waveform Visualizer ── */}
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-2.5">
+                    <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mb-2 text-center">Waveform Analysis</p>
+                    <div ref={waveformRef} className="w-full rounded-lg overflow-hidden bg-gray-50/50 border border-gray-100/50 relative mb-1.5">
+                      {/* WaveSurfer mounts here */}
                     </div>
-                  );
-                })()}
 
-                {/* ── Audio Waveform Visualizer ── */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-2.5">
-                  <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mb-2 text-center">Waveform Analysis</p>
-                  <div ref={waveformRef} className="w-full rounded-lg overflow-hidden bg-gray-50/50 border border-gray-100/50 relative mb-1.5">
-                    {/* WaveSurfer mounts here */}
-                  </div>
+                    {/* What We Heard text underneath */}
+                    <div className="pt-2 border-t border-gray-50 flex flex-col items-center">
+                      <p className="text-[7px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2 text-center">Raw Output</p>
 
-                  {/* What We Heard text underneath */}
-                  <div className="pt-2 border-t border-gray-50 flex flex-col items-center">
-                    <p className="text-[7px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2 text-center">Decoded Performance</p>
-                    
-                    {/* Intelligent Tajweed Pod — Semantic Performance UI */}
-                    {(() => {
-                      const score = analysisResult.score || 0;
-                      
-                      // Semantic Color Map
-                      const theme = 
-                        score >= 85 ? { name: 'emerald', hex: '#10b981', glow: 'rgba(16,185,129,0.12)' } : 
-                        score >= 70 ? { name: 'blue',    hex: '#3b82f6', glow: 'rgba(59,130,246,0.10)' } : 
-                        score >= 50 ? { name: 'amber',   hex: '#f59e0b', glow: 'rgba(245,158,11,0.10)' } : 
-                                      { name: 'rose',    hex: '#f43f5e', glow: 'rgba(244,63,94,0.12)' };
-                      
-                      return (
-                        <div 
-                          className="relative w-full overflow-hidden rounded-2xl p-4 shadow-sm border border-emerald-100/50 transition-all duration-700 group/raw"
-                          style={{
-                            background: `linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(59,130,246,0.04) 50%, rgba(139,92,246,0.04) 100%)`,
-                            boxShadow: `inset 0 0 50px ${theme.glow}`
-                          }}
-                        >
-                          {/* Premium Center Radial Highlight */}
-                          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.7),transparent_70%)] opacity-60" />
-                          
-                          {/* Dynamic Color Accent */}
-                          <div 
-                            className="absolute -top-10 -left-10 w-28 h-28 blur-3xl rounded-full transition-all duration-1000 opacity-30" 
-                            style={{ backgroundColor: theme.hex }}
-                          />
-                          
-                          <p 
-                            className="relative z-10 text-slate-800 font-semibold text-[13.5px] text-center leading-relaxed antialiased tracking-wide"
-                            style={{ 
-                              textShadow: '0 1px 2px rgba(255,255,255,0.8)',
-                              letterSpacing: '0.5px' 
-                            }} 
-                            dir="rtl"
+                      {/* Intelligent Tajweed Pod — Semantic Performance UI */}
+                      {(() => {
+                        const score = analysisResult.score || 0;
+
+                        // Semantic Color Map
+                        const theme =
+                          score >= 85 ? { name: 'emerald', hex: '#10b981', glow: 'rgba(16,185,129,0.12)' } :
+                            score >= 70 ? { name: 'blue', hex: '#3b82f6', glow: 'rgba(59,130,246,0.10)' } :
+                              score >= 50 ? { name: 'amber', hex: '#f59e0b', glow: 'rgba(245,158,11,0.10)' } :
+                                { name: 'rose', hex: '#f43f5e', glow: 'rgba(244,63,94,0.12)' };
+
+                        return (
+                          <div
+                            className="relative w-full overflow-hidden rounded-2xl p-4 shadow-sm border border-emerald-100/50 transition-all duration-700 group/raw"
+                            style={{
+                              background: `linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(59,130,246,0.04) 50%, rgba(139,92,246,0.04) 100%)`,
+                              boxShadow: `inset 0 0 50px ${theme.glow}`
+                            }}
                           >
-                            {analysisResult.raw_text || <span className="text-slate-400 font-normal italic">Waiting for your recitation...</span>}
-                          </p>
-                        </div>
-                      );
-                    })()}
+                            {/* Premium Center Radial Highlight */}
+                            <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.7),transparent_70%)] opacity-60" />
+
+                            {/* Dynamic Color Accent */}
+                            <div
+                              className="absolute -top-10 -left-10 w-28 h-28 blur-3xl rounded-full transition-all duration-1000 opacity-30"
+                              style={{ backgroundColor: theme.hex }}
+                            />
+
+                            <p
+                              className="relative z-10 text-slate-800 font-semibold text-[13.5px] text-center leading-relaxed antialiased tracking-wide"
+                              style={{
+                                textShadow: '0 1px 2px rgba(255,255,255,0.8)',
+                                letterSpacing: '0.5px'
+                              }}
+                              dir="rtl"
+                            >
+                              {analysisResult.raw_text || <span className="text-slate-400 font-normal italic">Waiting for your recitation...</span>}
+                            </p>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
+
+                  {/* ── Audio Controls ── */}
+                  <div className="flex gap-2 justify-center w-full mt-2.5">
+                    <button
+                      onClick={isPlayingRecording ? pauseRecording : playRecording}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px]"
+                    >
+                      <Volume2 size={12} />
+                      {isPlayingRecording ? 'Pause' : 'Play Yours'}
+                    </button>
+                    <button
+                      onClick={playReferenceOnce}
+                      className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 rounded-lg hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px] ${isPlaying ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                    >
+                      <Headphones size={12} />
+                      {isPlaying ? 'Pause' : 'Listen Ref'}
+                    </button>
+                    <button
+                      onClick={() => { setRecordedBlob(null); setRecordedUrl(null); setAnalysisResult(null); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px]"
+                    >
+                      <RefreshCw size={12} />
+                      Try Again
+                    </button>
+                  </div>
+
                 </div>
+              )}
+            </>
+          )}
+        </div>
 
-                {/* ── Audio Controls ── */}
-                <div className="flex gap-2 justify-center w-full mt-2.5">
-                  <button
-                    onClick={isPlayingRecording ? pauseRecording : playRecording}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px]"
-                  >
-                    <Volume2 size={12} />
-                    {isPlayingRecording ? 'Pause' : 'Play Yours'}
-                  </button>
-                  <button
-                    onClick={playReferenceOnce}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 rounded-lg hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px] ${isPlaying ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
-                  >
-                    <Headphones size={12} />
-                    {isPlaying ? 'Pause' : 'Listen Ref'}
-                  </button>
-                  <button
-                    onClick={() => { setRecordedBlob(null); setRecordedUrl(null); setAnalysisResult(null); }}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.25 bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm transition-all duration-200 font-bold text-[11px]"
-                  >
-                    <RefreshCw size={12} />
-                    Try Again
-                  </button>
-                </div>
-
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="bg-gray-50 p-4.5 flex items-center justify-between text-[11px] text-gray-500 border-t border-gray-100 rounded-b-[2rem] sm:rounded-b-[2.5rem]">
-        <span>Mode: <strong className="text-emerald-700 font-semibold bg-emerald-100 px-2 py-0.5 rounded-md shadow-sm">Tartil (Slow)</strong></span>
-        <span className={`flex items-center gap-2 font-medium px-2.5 py-1 rounded-lg shadow-sm border ${isRecording ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-gray-100'}`}>
-          <span className="relative flex h-2 w-2">
-            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isRecording ? 'bg-red-400' : 'bg-emerald-400'} opacity-75`}></span>
-            <span className={`relative inline-flex rounded-full h-2 w-2 ${isRecording ? 'bg-red-500' : 'bg-emerald-500'} shadow-sm`}></span>
+        <div className="bg-gray-50 p-4.5 flex items-center justify-between text-[11px] text-gray-500 border-t border-gray-100 rounded-b-[2rem] sm:rounded-b-[2.5rem]">
+          <span>Mode: <strong className="text-emerald-700 font-semibold bg-emerald-100 px-2 py-0.5 rounded-md shadow-sm">Tartil (Slow)</strong></span>
+          <span className={`flex items-center gap-2 font-medium px-2.5 py-1 rounded-lg shadow-sm border ${isRecording ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-gray-100'}`}>
+            <span className="relative flex h-2 w-2">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isRecording ? 'bg-red-400' : 'bg-emerald-400'} opacity-75`}></span>
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${isRecording ? 'bg-red-500' : 'bg-emerald-500'} shadow-sm`}></span>
+            </span>
+            {isRecording ? 'Recording...' : recordedBlob ? 'Recording saved' : 'Ready to record'}
           </span>
-          {isRecording ? 'Recording...' : recordedBlob ? 'Recording saved' : 'Ready to record'}
-        </span>
+        </div>
       </div>
+
+      {focusedWord && (
+        <WordFocusModal
+          word={focusedWord}
+          onClose={() => setFocusedWord(null)}
+          mode="context"
+        />
+      )}
+
+
     </div>
-
-    {focusedWord && (
-      <WordFocusModal
-        word={focusedWord}
-        onClose={() => setFocusedWord(null)}
-        mode="context"
-      />
-    )}
-
-
-  </div>
-);
+  );
 }
 
 const AdvancedNavigator = ({

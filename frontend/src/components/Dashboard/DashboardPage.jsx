@@ -149,18 +149,31 @@ export default function DashboardPage({ userProfile }) {
       let url = session?.audio_url;
 
       // ON-DEMAND FETCH: If no URL, fetch specifically now
-      if (!url) {
+      if (!url && token) {
         setPlayingId(sessionId); // Show loading state early
-        const res = await fetch(API.DASHBOARD_AUDIO(sessionId), {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!res.ok) throw new Error('Failed to fetch audio URL');
-        const urlData = await res.json();
-        url = urlData.url;
+        try {
+          const res = await fetch(API.DASHBOARD_AUDIO(sessionId), {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const urlData = await res.json();
+            url = urlData.url;
+          }
+        } catch (e) {
+          console.warn('Could not fetch server audio:', e);
+        }
+      }
+
+      // ON-DEMAND FETCH: If no URL and it's a guest, check the Local Vault
+      if (!url && !token) {
+        try {
+          const vault = JSON.parse(localStorage.getItem('guest_audio_vault') || '{}');
+          url = vault[sessionId];
+        } catch (e) { console.warn('Local vault access failed:', e); }
       }
 
       if (!url) {
-        console.warn('No audio URL found for session:', sessionId);
+        console.warn('No audio source found for session:', sessionId);
         setPlayingId(null);
         return;
       }
@@ -207,9 +220,13 @@ export default function DashboardPage({ userProfile }) {
     const history = JSON.parse(localStorage.getItem('practice_history_list') || '[]'); // List of objects
     const ayahs = JSON.parse(localStorage.getItem('completed_ayahs') || '[]');
     const streak = calculateStreak(dates);
-    const recentSessions = history.slice(-10).reverse().map(s => ({
+    const recentSessions = history.slice(-50).reverse().map(s => ({
       ...s,
-      tajweedAvg: s.score,
+      accuracy: s.accuracy || 0,
+      mistake_count: s.mistake_count || 0,
+      total_words: s.total_words || 0,
+      grade: s.grade || 'N/A',
+      tajweedAvg: s.tajweedAvg || s.score || 0,
       confidence: s.score >= 90 ? 'High' : 'Medium'
     }));
 

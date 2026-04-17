@@ -5,6 +5,7 @@ Handles: Preprocessing → Parallel ASR + Feature Extraction → Alignment → S
 import os
 import concurrent.futures
 import json
+import random
 import numpy as np
 
 # Load our local modules
@@ -66,7 +67,8 @@ def compare_words(asr_words: list, asr_word_timings: list, expected_words: list)
                 status = "correct" if best_sim >= 0.75 else ("partial" if best_sim >= 0.40 else "missing")
                 is_phonetic_error = False
         else:
-            status = "correct" if best_sim >= 0.85 else ("partial" if best_sim >= 0.6 else "missing")
+            # 🕋 Stricter Ayah Evaluation (The Qari Standard)
+            status = "correct" if best_sim >= 0.90 else ("partial" if best_sim >= 0.60 else "missing")
             is_phonetic_error = False
 
         word_results.append({
@@ -82,7 +84,9 @@ def compare_words(asr_words: list, asr_word_timings: list, expected_words: list)
 
     correct = sum(1 for w in word_results if w["status"] == "correct")
     partial = sum(1 for w in word_results if w["status"] == "partial")
-    accuracy = (correct + partial * 0.7) / max(len(valid_expected), 1) * 100
+    
+    # ⚖️ Punishment for non-perfection: Partial words only give 35% accuracy credit
+    accuracy = (correct + partial * 0.35) / max(len(valid_expected), 1) * 100
 
     return {"accuracy": round(accuracy, 1), "word_results": word_results}
 
@@ -542,6 +546,17 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
     for wr in word_feedbacks:
         if wr["status"] == "missing" or wr["status"] == "incorrect":
             feedback.append({"type": "error", "icon": "❌", "message": f"You missed the word \"{wr['expected']}\"", "word": wr["expected"]})
+        elif wr["status"] == "partial":
+            COACHING_TEMPLATES = [
+                f"Almost! Check the pronunciation of \"{wr['expected']}\".",
+                f"Close! \"{wr['expected']}\" needs a bit more clarity.",
+                f"Getting there! Just polish your \"{wr['expected']}\" sounds.",
+                f"Good try! Minor pronunciation slip on \"{wr['expected']}\".",
+                f"Keep at it! Focus on the articulation of \"{wr['expected']}\"."
+            ]
+            msg = random.choice(COACHING_TEMPLATES)
+            feedback.append({"type": "info", "icon": "💡", "message": msg, "word": wr["expected"]})
+        
         for issue in wr.get("tajweed", []):
             if issue.get("severity") == "warning":
                 feedback.append({"type": "warning", "icon": "⚠️", "message": issue["message"], "rule": issue["rule"]})

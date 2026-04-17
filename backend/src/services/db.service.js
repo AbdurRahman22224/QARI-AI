@@ -477,10 +477,16 @@ async function getDashboardStats(qfUserId, filter = 'recent', userToken = null) 
 async function getSessionAudioUrl(sessionId) {
   if (!supabase) return null;
   try {
+    // 🛡️ Guard: Validate integer range for Postgres (int4)
+    const idNum = Number(sessionId);
+    if (isNaN(idNum) || idNum > 2147483647 || idNum < 1) {
+      return null; 
+    }
+
     const { data, error } = await supabase
       .from('practice_sessions')
       .select('audio_url')
-      .eq('id', sessionId)
+      .eq('id', idNum)
       .single();
     if (error) throw error;
     return data?.audio_url;
