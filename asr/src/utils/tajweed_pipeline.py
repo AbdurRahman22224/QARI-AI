@@ -574,28 +574,40 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
         
     # Generate legacy feedback list
     feedback = []
+    
+    # --- Hardcode Randomization Logic ---
+    # Create a pool of statements and shuffle them once per verse/audio pipeline call
+    BASES = [
+        "Almost! Check the pronunciation of \"{word}\".",
+        "Close! \"{word}\" needs a bit more clarity.",
+        "Getting there! Just polish your \"{word}\" sounds.",
+        "Good try! Minor pronunciation slip on \"{word}\".",
+        "Keep at it! Focus on the articulation of \"{word}\"."
+    ]
+    random.shuffle(BASES)
+    statement_idx = 0
+
     for wr in word_feedbacks:
         if wr["status"] == "missing" or wr["status"] == "incorrect":
             feedback.append({"type": "error", "icon": "❌", "message": f"\"{wr['expected']}\" is incorrect.", "word": wr["expected"]})
         elif wr["status"] == "partial":
-            COACHING_TEMPLATES = [
-                f"Almost! Check the pronunciation of \"{wr['expected']}\".",
-                f"Close! \"{wr['expected']}\" needs a bit more clarity.",
-                f"Getting there! Just polish your \"{wr['expected']}\" sounds.",
-                f"Good try! Minor pronunciation slip on \"{wr['expected']}\".",
-                f"Keep at it! Focus on the articulation of \"{wr['expected']}\"."
-            ]
-            msg = random.choice(COACHING_TEMPLATES)
+            # Pick a unique statement from our shuffled verse-pool
+            template = BASES[statement_idx % len(BASES)]
+            statement_idx += 1
+            msg = template.format(word=wr['expected'])
             feedback.append({"type": "info", "icon": "💡", "message": msg, "word": wr["expected"]})
 
         # Add any Tajweed-specific warnings (Madd, Ghunnah, OR our new Phonetic warnings)
+        # ONLY ONE LOOP HERE TO PREVENT DUPLICATES
         for t in wr.get("tajweed", []):
-            if t["severity"] == "warning":
-                feedback.append({"type": "warning", "icon": "⚠️", "message": t["message"], "word": wr["expected"]})
-        
-        for issue in wr.get("tajweed", []):
-            if issue.get("severity") == "warning":
-                feedback.append({"type": "warning", "icon": "⚠️", "message": issue["message"], "rule": issue["rule"]})
+            if t.get("severity") == "warning":
+                feedback.append({
+                    "type": "warning", 
+                    "icon": "⚠️", 
+                    "message": t["message"], 
+                    "word": wr["expected"],
+                    "rule": t.get("rule", "tajweed")
+                })
 
     suggestions = []
     if accuracy_score < 70: suggestions.append("Listen to the reference recitation carefully, then try reciting word by word.")

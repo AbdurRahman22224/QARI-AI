@@ -1,8 +1,46 @@
 {
-  "hash": "5edc7cf9",
+  "hash": "38397bf2",
   "configHash": "be611c42",
-  "lockfileHash": "e3b0c442",
-  "browserHash": "d0d483f7",
-  "optimized": {},
-  "chunks": {}
+  "lockfileHash": "ead0de58",
+  "browserHash": "231c6931",
+  "optimized": {
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "632691c1",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "e52f6fa1",
+      "needsInterop": true
+    },
+    "lucide-react": {
+      "src": "../../node_modules/lucide-react/dist/esm/lucide-react.js",
+      "file": "lucide-react.js",
+      "fileHash": "8681e108",
+      "needsInterop": false
+    },
+    "wavesurfer.js": {
+      "src": "../../node_modules/wavesurfer.js/dist/wavesurfer.esm.js",
+      "file": "wavesurfer__js.js",
+      "fileHash": "f90356d7",
+      "needsInterop": false
+    },
+    "wavesurfer.js/dist/plugins/regions.esm.js": {
+      "src": "../../node_modules/wavesurfer.js/dist/plugins/regions.esm.js",
+      "file": "wavesurfer__js_dist_plugins_regions__esm__js.js",
+      "fileHash": "d733511f",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-3IFX6TK2": {
+      "file": "chunk-3IFX6TK2.js"
+    },
+    "chunk-G3PMV62Z": {
+      "file": "chunk-G3PMV62Z.js"
+    }
+  }
 }
