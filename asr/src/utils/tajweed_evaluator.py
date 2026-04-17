@@ -35,21 +35,21 @@ def compute_tafkhim_score(user_features: dict, ref_features: dict) -> float:
     
     # Very generous scoring:
     # If centroid is at or below average → full marks for centroid component
-    # If centroid is up to 20% above average → still acceptable (microphone variance)
+    # If centroid is up to 35% above average → still acceptable (microphone variance)
     if c_ratio <= 1.0:
         centroid_score = 1.0
-    elif c_ratio <= 1.2:
-        centroid_score = 0.8
+    elif c_ratio <= 1.35:
+        centroid_score = 0.9
     else:
-        centroid_score = max(0.5, 1.0 / c_ratio)
+        centroid_score = max(0.6, 1.0 / c_ratio)
     
     # If low-freq ratio is at or above average → full marks
     if l_ratio >= 1.0:
         low_freq_score = 1.0
-    elif l_ratio >= 0.8:
-        low_freq_score = 0.85
+    elif l_ratio >= 0.7:
+        low_freq_score = 0.9
     else:
-        low_freq_score = max(0.5, l_ratio)
+        low_freq_score = max(0.6, l_ratio)
     
     score = 0.5 * centroid_score + 0.5 * low_freq_score
     return round(float(max(0.0, min(1.0, score))), 2)

@@ -545,7 +545,7 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
     feedback = []
     for wr in word_feedbacks:
         if wr["status"] == "missing" or wr["status"] == "incorrect":
-            feedback.append({"type": "error", "icon": "❌", "message": f"You missed the word \"{wr['expected']}\"", "word": wr["expected"]})
+            feedback.append({"type": "error", "icon": "❌", "message": f"\"{wr['expected']}\" is incorrect.", "word": wr["expected"]})
         elif wr["status"] == "partial":
             COACHING_TEMPLATES = [
                 f"Almost! Check the pronunciation of \"{wr['expected']}\".",
