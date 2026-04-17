@@ -10,7 +10,6 @@ import numpy as np
 
 # Load our local modules
 from src.utils.normalize_arabic import normalize_arabic
-from src.utils.phonetic_utils import get_recitation_variants
 from src.utils.audio_features import load_and_preprocess_audio, extract_frame_features, get_segment_features
 from src.utils.tajweed_evaluator import compute_madd_score, compute_ghunnah_score, compute_qalqalah_score, compute_tafkhim_score
 
@@ -26,10 +25,10 @@ def levenshtein_similarity(s1: str, s2: str) -> float:
         return matches / max(len(s1), len(s2), 1)
 
 
-def compare_words(asr_words: list, asr_word_timings: list, expected_words: list):
+def compare_words(asr_words: list, asr_word_timings: list, expected_words: list, ref_phonetic_words: list = None):
     """
     Greedy word alignment with index locking. Maps ASR words back to EXPECTED words.
-    Returns list of mapped info including the raw audio timing segment for that word.
+    Use ref_phonetic_words as the primary alignment target if provided.
     """
     if not expected_words:
         return {"accuracy": 0, "word_results": []}
@@ -38,22 +37,25 @@ def compare_words(asr_words: list, asr_word_timings: list, expected_words: list)
     used_asr_indices = set()
     valid_expected = [w for w in expected_words if w and w.strip()]
     
+    # 💎 Acoustic Benchmark Strategy:
+    # If we have the phonetic words from the master reciter, we use them for alignment
+    # because they better represent what is ACTUALLY being said (handling Idgham etc.)
+    has_benchmark = (ref_phonetic_words is not None and len(ref_phonetic_words) == len(valid_expected))
+    
     for exp_idx, exp_word in enumerate(valid_expected):
-        next_word = valid_expected[exp_idx + 1] if exp_idx + 1 < len(valid_expected) else None
-        variants = get_recitation_variants(exp_word, next_word)
-        
+        # Target for comparison is either the phonetic reciter word or the literal text
+        if has_benchmark:
+            norm_target = normalize_arabic(ref_phonetic_words[exp_idx]["word"])
+        else:
+            norm_target = normalize_arabic(exp_word)
+            
         best_match, best_sim, best_idx = None, 0.0, -1
-        chosen_variant = variants[0] # Default to literal
 
         for i, asr_word in enumerate(asr_words):
             if i in used_asr_indices: continue
-            
-            # Check against all phonetic/literal variants
-            for variant in variants:
-                sim = levenshtein_similarity(asr_word, variant["text"])
-                if sim > best_sim:
-                    best_sim, best_match, best_idx = sim, asr_word, i
-                    chosen_variant = variant
+            sim = levenshtein_similarity(asr_word, norm_target)
+            if sim > best_sim:
+                best_sim, best_match, best_idx = sim, asr_word, i
 
         # Link to Whisper Timestamp segment
         word_timing = {"start": 0.0, "end": 0.0, "tokens": [], "prob": 0.0}
@@ -62,7 +64,13 @@ def compare_words(asr_words: list, asr_word_timings: list, expected_words: list)
             used_asr_indices.add(best_idx)
             
         prob = word_timing.get("prob", 1.0)
-        print(f"      [Alignment] '{exp_word}' match: sim={best_sim*100:.1f}%, prob={prob:.3f}", flush=True)
+        
+        # Log benchmark usage
+        if has_benchmark:
+            benchmark_word = ref_phonetic_words[exp_idx]['word']
+            print(f"      [Acoustic Matching] '{exp_word}' (Reciter: '{benchmark_word}') ↔ User: '{best_match or '?'}' (sim={best_sim*100:.1f}%)", flush=True)
+        else:
+            print(f"      [Alignment] '{exp_word}' match: sim={best_sim*100:.1f}%, prob={prob:.3f}", flush=True)
 
         # Strict thresholds for Ayahs, highly forgiving thresholds for isolated Word Lab words
         if len(valid_expected) == 1:
@@ -76,24 +84,12 @@ def compare_words(asr_words: list, asr_word_timings: list, expected_words: list)
                 is_phonetic_error = False
         else:
             # 🕋 Stricter Ayah Evaluation (The Qari Standard)
-            status = "correct" if best_sim >= 0.90 else ("partial" if best_sim >= 0.60 else "missing")
+            # 💎 Benchmark bonus: If we have a high-confidence benchmark, we can be slightly more precise
+            correct_thresh = 0.90 if not has_benchmark else 0.85
+            partial_thresh = 0.60 if not has_benchmark else 0.55
+            
+            status = "correct" if best_sim >= correct_thresh else ("partial" if best_sim >= partial_thresh else "missing")
             is_phonetic_error = False
-
-        # 🛡️ Pedagogical Check: Missed Phonetic Rule
-        # If the Literal variant was matched but a Phonetic one was available, they missed the rule.
-        phonetic_warning = None
-        has_phonetic_options = any(v["is_phonetic"] for v in variants)
-        if has_phonetic_options and not chosen_variant["is_phonetic"] and best_sim >= 0.85:
-            # They recited it literally (e.g. "Man") when they should have merged (e.g. "Ma")
-            # We find the rule that was missed
-            missed_rule = next((v["rule"] for v in variants if v["is_phonetic"]), "tajweed")
-            rule_names = {"idgham": "Idgham (Merging)", "iqlab": "Iqlab (Conversion)", "solar_lam": "Solar Lam", "wassla": "Al-Wassla"}
-            name = rule_names.get(missed_rule, "Tajweed")
-            phonetic_warning = {
-                "rule": missed_rule,
-                "severity": "warning",
-                "message": f"You recited this literally, but it should be {name} sounds."
-            }
 
         word_results.append({
             "expected": exp_word,
@@ -101,8 +97,7 @@ def compare_words(asr_words: list, asr_word_timings: list, expected_words: list)
             "status": status,
             "similarity": round(best_sim * 100, 1),
             "timing": word_timing,
-            "phonetic_error": is_phonetic_error,
-            "tajweed": [phonetic_warning] if phonetic_warning else []
+            "phonetic_error": is_phonetic_error
         })
         
         print(f"  └─ Word {exp_idx}: '{exp_word}' → '{best_match or '?'}' = {status.upper()} ({round(best_sim*100,1)}%)", flush=True)
@@ -137,7 +132,7 @@ def estimate_vowel_duration(word: str, rule: str, timing_info: dict) -> float:
         vowel_duration = (timing_info.get("end", 0.0) - timing_info.get("start", 0.0)) / max(len(tokens), 1.5)
         
     return vowel_duration
-def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_duration, word_durations=None, asr_model=None, strict_pace: bool = False):
+def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_duration, word_durations=None, asr_model=None, strict_pace: bool = False, ref_phonetic_words: list = None):
     """
     Executes the Parallel Architecture Pipeline for hybrid Tajweed analysis.
     """
@@ -213,7 +208,7 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
 
     # 3. Alignment Layer
     print("   [Step 3] Word alignment...", flush=True)
-    comparison = compare_words(asr_words, asr_timings, expected_word_list)
+    comparison = compare_words(asr_words, asr_timings, expected_word_list, ref_phonetic_words=ref_phonetic_words)
     accuracy_score = comparison["accuracy"]
     print(f"   ✅ Alignment done (Accuracy: {accuracy_score}%)", flush=True)
     
@@ -495,12 +490,6 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
             total_tajweed_score += score
             rules_evaluated_count += 1
             
-        # 🧪 Handle any phonetic warnings from the alignment phase (e.g. Literal pronunciation slip)
-        for issue in wr.get("tajweed", []):
-            if issue.get("severity") == "warning" and "recited this literally" in issue.get("message", "").lower():
-                total_tajweed_score += 0.6 # Penalize for missing the phonetic rule
-                rules_evaluated_count += 1
-
         word_feedbacks.append(wr)
     
     # ── Final Scoring ──
@@ -574,40 +563,23 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
         
     # Generate legacy feedback list
     feedback = []
-    
-    # --- Hardcode Randomization Logic ---
-    # Create a pool of statements and shuffle them once per verse/audio pipeline call
-    BASES = [
-        "Almost! Check the pronunciation of \"{word}\".",
-        "Close! \"{word}\" needs a bit more clarity.",
-        "Getting there! Just polish your \"{word}\" sounds.",
-        "Good try! Minor pronunciation slip on \"{word}\".",
-        "Keep at it! Focus on the articulation of \"{word}\"."
-    ]
-    random.shuffle(BASES)
-    statement_idx = 0
-
     for wr in word_feedbacks:
         if wr["status"] == "missing" or wr["status"] == "incorrect":
             feedback.append({"type": "error", "icon": "❌", "message": f"\"{wr['expected']}\" is incorrect.", "word": wr["expected"]})
         elif wr["status"] == "partial":
-            # Pick a unique statement from our shuffled verse-pool
-            template = BASES[statement_idx % len(BASES)]
-            statement_idx += 1
-            msg = template.format(word=wr['expected'])
+            COACHING_TEMPLATES = [
+                f"Almost! Check the pronunciation of \"{wr['expected']}\".",
+                f"Close! \"{wr['expected']}\" needs a bit more clarity.",
+                f"Getting there! Just polish your \"{wr['expected']}\" sounds.",
+                f"Good try! Minor pronunciation slip on \"{wr['expected']}\".",
+                f"Keep at it! Focus on the articulation of \"{wr['expected']}\"."
+            ]
+            msg = random.choice(COACHING_TEMPLATES)
             feedback.append({"type": "info", "icon": "💡", "message": msg, "word": wr["expected"]})
-
-        # Add any Tajweed-specific warnings (Madd, Ghunnah, OR our new Phonetic warnings)
-        # ONLY ONE LOOP HERE TO PREVENT DUPLICATES
-        for t in wr.get("tajweed", []):
-            if t.get("severity") == "warning":
-                feedback.append({
-                    "type": "warning", 
-                    "icon": "⚠️", 
-                    "message": t["message"], 
-                    "word": wr["expected"],
-                    "rule": t.get("rule", "tajweed")
-                })
+        
+        for issue in wr.get("tajweed", []):
+            if issue.get("severity") == "warning":
+                feedback.append({"type": "warning", "icon": "⚠️", "message": issue["message"], "rule": issue["rule"]})
 
     suggestions = []
     if accuracy_score < 70: suggestions.append("Listen to the reference recitation carefully, then try reciting word by word.")

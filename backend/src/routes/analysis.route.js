@@ -32,6 +32,7 @@ router.post('/analyze', upload.single('audio'), async (req, res) => {
     if (req.body.tajweed_map) formData.append('tajweed_map', req.body.tajweed_map);
     if (req.body.word_durations) formData.append('word_durations', req.body.word_durations);
     if (req.body.reference_duration) formData.append('reference_duration', req.body.reference_duration);
+    if (req.body.reference_audio_url) formData.append('reference_audio_url', req.body.reference_audio_url);
 
     const response = await axios.post(`${ASR_SERVICE_URL}/analyze`, formData, {
       headers: formData.getHeaders(),
@@ -75,6 +76,18 @@ router.post('/analyze-reference', async (req, res) => {
     } else {
       console.error('❌ Reference analysis proxy error:', error.message);
     }
+    res.status(status).json(error.response?.data || { error: 'ASR Service connection failed' });
+  }
+});
+
+// Proxy to ASR Service (Acoustic Pre-warming)
+router.post('/pre-warm', async (req, res) => {
+  try {
+    const response = await axios.post(`${ASR_SERVICE_URL}/pre-warm`, req.body, { timeout: 30000 });
+    res.json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 500;
+    console.error('❌ Pre-warm proxy error:', error.message);
     res.status(status).json(error.response?.data || { error: 'ASR Service connection failed' });
   }
 });

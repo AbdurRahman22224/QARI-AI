@@ -56,9 +56,12 @@ from src.utils.audio_features import load_and_preprocess_audio, extract_frame_fe
 import threading
 
 REFERENCE_CACHE = {}
+PHONETIC_CACHE = {}  # 💎 Store reference phonetic transcriptions
 DURATION_CACHE = {}  # 🕒 Cache for verse durations to prevent redundant fetches
 FETCH_LOCKS = {}     # 🔒 Track in-progress fetches to prevent redundant parallel downloads
+TRANSCRIBE_LOCKS = {} # 🔒 Track in-progress transcriptions
 FETCH_LOCKS_LOCK = threading.Lock()
+TRANSCRIBE_LOCKS_LOCK = threading.Lock()
 
 def normalize_url(url: str) -> str:
     """Consistently formats reference URLs for stable cache keys."""
@@ -113,6 +116,64 @@ def get_audio_from_url(url: str):
             print(f"❌ [Cache] Ref audio download failed for {url}: {e}")
             return None, None
 
+def get_transcribe_lock(url):
+    """Provides a thread-safe lock unique to each URL."""
+    norm_url = normalize_url(url)
+    with TRANSCRIBE_LOCKS_LOCK:
+        if norm_url not in TRANSCRIBE_LOCKS:
+            TRANSCRIBE_LOCKS[norm_url] = threading.Lock()
+        return TRANSCRIBE_LOCKS[norm_url]
+
+def get_phonetic_benchmark(url: str):
+    """Fetches and transcribes the reference audio to create a phonetic benchmark."""
+    url = normalize_url(url)
+    if not url: return None
+    
+    if url in PHONETIC_CACHE:
+        return PHONETIC_CACHE[url]
+        
+    with get_transcribe_lock(url):
+        # Double check after lock
+        if url in PHONETIC_CACHE:
+            return PHONETIC_CACHE[url]
+            
+        audio, sr = get_audio_from_url(url)
+        if audio is None:
+            return None
+            
+        print(f"   🎙️ [ASR] Generating phonetic benchmark for: {url[:60]}...", flush=True)
+        try:
+            # We use the same model to transcribe the reference reciter
+            # This ensures the 'ear' is the same for both benchmark and student
+            segments_gen, _ = model.transcribe(
+                audio, language="ar", word_timestamps=True,
+                beam_size=5, vad_filter=True, temperature=0.0,
+                initial_prompt="آيات القرآن الكريم برواية حفص عن عاصم"
+            )
+            
+            phonetic_words = []
+            for segment in segments_gen:
+                if segment.words:
+                    for w in segment.words:
+                        phonetic_words.append({
+                            "word": w.word.strip(),
+                            "start": w.start,
+                            "end": w.end,
+                            "prob": w.probability
+                        })
+            
+            PHONETIC_CACHE[url] = phonetic_words
+            
+            # 💎 Log the benchmark output for visibility
+            benchmark_text = " ".join([w["word"] for w in phonetic_words])
+            print(f"   ✅ [ASR] Phonetic benchmark ready: {len(phonetic_words)} words found.")
+            print(f"      TEXT: \"{benchmark_text}\"", flush=True)
+            
+            return phonetic_words
+        except Exception as e:
+            print(f"❌ [ASR] Reference transcription failed: {e}")
+            return None
+
 @app.route('/', methods=['GET'])
 def index():
     return jsonify({
@@ -164,6 +225,32 @@ def analyze_reference():
         print(f"⚠️ Mutagen error for {raw_url}: {e}")
         return jsonify({"duration": 0.0, "warning": str(e)}), 200
 
+@app.route('/pre-warm', methods=['POST'])
+def pre_warm():
+    """
+    Initiates transcription of the reference audio in the background (or foreground)
+    to minimize latency when the user submits their recording.
+    """
+    try:
+        raw_url = request.json.get('reference_audio_url', '')
+        ref_url = normalize_url(raw_url)
+        if not ref_url:
+            return jsonify({"status": "no_url"}), 200
+
+        # We don't use threading here yet to keep it simple, but since the frontend 
+        # calls this without waiting, it functions as a background job for the next request.
+        # Fire and forget phonetic generation.
+        get_phonetic_benchmark(ref_url)
+        
+        return jsonify({
+            "status": "success",
+            "message": "Phonetic benchmark cached",
+            "pre_warmed": True
+        }), 200
+    except Exception as e:
+        print(f"⚠️ Pre-warm error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 200
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
     """
@@ -178,6 +265,7 @@ def analyze():
     tajweed_map_str = request.form.get('tajweed_map', '{}')
     word_durations_str = request.form.get('word_durations', '{}')
     ref_duration = float(request.form.get('reference_duration', 0.0))
+    ref_url = request.form.get('reference_audio_url', '')
     
     try:
         # Priority 1: Use specific word list if provided
@@ -198,9 +286,20 @@ def analyze():
         audio_path = tmp.name
         
     try:
+        # Get phonetic benchmark if URL is provided
+        ref_phonetic_words = None
+        if ref_url:
+            ref_phonetic_words = get_phonetic_benchmark(ref_url)
+            if ref_phonetic_words:
+                print(f"   🎯 [ASR] Using phonetic benchmark alignment ({len(ref_phonetic_words)} words)")
+
         print(f"🔬 [FullAyah] Analyzing {len(expected_words)} words...")
         from src.utils.tajweed_pipeline import process_audio_pipeline
-        result = process_audio_pipeline(audio_path, expected_words, tajweed_map, ref_duration, word_durations=word_durations, asr_model=model)
+        result = process_audio_pipeline(
+            audio_path, expected_words, tajweed_map, ref_duration, 
+            word_durations=word_durations, asr_model=model,
+            ref_phonetic_words=ref_phonetic_words
+        )
         return jsonify(result)
     except Exception as e:
         import traceback
@@ -265,9 +364,15 @@ def analyze_word_hybrid():
                 ref_dur = 0.0
         
         # Call the unified pipeline orchestrator for this single word
+        ref_phonetic_words = get_phonetic_benchmark(ref_url) if ref_url else None
+        
         from src.utils.tajweed_pipeline import process_audio_pipeline
         print("   🚀 Starting evaluation pipeline...")
-        result = process_audio_pipeline(user_path, [word_text], tajweed_map, ref_dur, asr_model=model, strict_pace=True)
+        result = process_audio_pipeline(
+            user_path, [word_text], tajweed_map, ref_dur, 
+            asr_model=model, strict_pace=True,
+            ref_phonetic_words=ref_phonetic_words
+        )
         
         # Format response for Word Lab UI compatibility
         wr = result["word_feedback"][0] if result["word_feedback"] else {}

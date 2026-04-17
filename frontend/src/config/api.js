@@ -14,6 +14,7 @@ export const API = {
   DASHBOARD_STATS: `${API_URL}/api/dashboard/stats`,
   DASHBOARD_TAJWEED: `${API_URL}/api/dashboard/tajweed`,
   DASHBOARD_AUDIO: (id) => `${API_URL}/api/dashboard/audio/${id}`,
+  PRE_WARM: `${API_URL}/api/pre-warm`,
   // Secure Quran Proxy
   QURAN: (path) => `${API_URL}/api/quran${path}`,
 };

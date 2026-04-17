@@ -291,6 +291,10 @@ export default function PracticePage() {
     formData.append('tajweed_map', JSON.stringify(tajweedMap));
     formData.append('word_durations', JSON.stringify(wordDurations)); // 🕒 Pass specific word anchors
     formData.append('reference_duration', effectiveRefDuration.toString()); // 🕒 Pass ref duration
+    
+    // 💎 Acoustic Benchmark: Pass the master's URL for phonetic alignment
+    const audioUrl = verseData.audio?.url || `https://verses.quran.com/${verseData.audio_url}`;
+    formData.append('reference_audio_url', audioUrl);
 
     try {
       const res = await fetch(API.ANALYZE, {
@@ -1182,6 +1186,17 @@ export default function PracticePage() {
       setRecordedBlob(null);
       setRecordedUrl(null);
       setRecordingTime(0);
+
+      // 💎 Pre-warm ASR: Begin transcribing the reference audio in the background
+      // This eliminates the 1-2s latency during the final analyze call.
+      if (verseData?.audio?.url || verseData?.audio_url) {
+        const audioUrl = verseData.audio?.url || `https://verses.quran.com/${verseData.audio_url}`;
+        fetch(API.PRE_WARM, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reference_audio_url: audioUrl })
+        }).catch(e => console.warn("[ASR] Pre-warm trigger failed:", e));
+      }
 
       // Timer
       recordingTimerRef.current = setInterval(() => {
