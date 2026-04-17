@@ -14,7 +14,7 @@ pinned: false
 
 ---
 
-## 🌟 The Vision
+## 🌟 The Vision 
 Reciting the Quran with proper Tajweed is a spiritual and technical journey. Qari AI democratizes access to quality feedback by using **Whisper-powered Speech-to-Text** and custom **Acoustic Feature Extraction** to provide instant, pedagogical feedback on rules like *Madd, Ghunnah, Qalqalah,* and *Tafkheem*.
 
 ## 🚀 Key Features
