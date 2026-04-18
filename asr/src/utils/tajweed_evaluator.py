@@ -55,38 +55,50 @@ def compute_tafkhim_score(user_features: dict, ref_features: dict) -> float:
     return round(float(max(0.0, min(1.0, score))), 2)
 
 
-def compute_qalqalah_score(user_features: dict, ref_features: dict) -> float:
+def compute_qalqalah_score(user_features: dict, ref_features: dict, word_text: str = "", is_terminal: bool = False) -> float:
     """
-    Qalqalah (قلقلة) — generous burst detection.
-    As long as the word has reasonable energy and some variation, it passes.
-    Qalqalah is very subtle in compressed audio; we bias toward passing.
+    Qalqalah (قلقلة) — Dynamic grading based on Shaddah and Position.
+    - Level 3 (Akbar): Shaddah + Terminal -> 2.7x
+    - Level 2 (Kubra): No Shaddah + Terminal -> 2.0x
+    - Level 1 (Sughra): Internal -> 1.5x
     """
     rms_frames = user_features.get("rms_frames", [])
-    duration = user_features.get("duration", 0.5)
     rms_mean = user_features.get("rms_mean", 0.0)
     
-    if not rms_frames or len(rms_frames) < 2:
-        return 0.7  # Not enough data — benefit of doubt
+    if not rms_frames or len(rms_frames) < 3:
+        return 0.7
     
-    # If the word has any reasonable energy, it's probably fine
-    if rms_mean > 0.01:
-        # Word was clearly spoken → start at 0.7 and add bonuses
-        score = 0.7
-        
-        peak = max(rms_frames)
-        mean_energy = sum(rms_frames) / len(rms_frames)
-        
-        # Bonus for having a peak (even a small one)
-        if peak > mean_energy * 1.1:
-            score += 0.15
-        
-        # Bonus for any energy variation at all
-        if len(set([round(r, 4) for r in rms_frames])) > 1:
-            score += 0.15
-            
-        return round(min(1.0, score), 2)
+    # 🕵️ Detect Tajweed Grade
+    has_shaddah = "ّ" in word_text
+    if is_terminal and has_shaddah:
+        mult, timing_gate, grade_name = 2.7, 0.7, "Akbar (Greatest)"
+    elif is_terminal:
+        mult, timing_gate, grade_name = 1.8, 0.6, "Kubra (Large)"
     else:
-        return 0.5  # Very quiet — moderate score
+        mult, timing_gate, grade_name = 1.5, 0.5, "Sughra (Small)"
+
+    if rms_mean > 0.01:
+        score = 0.65
+        peak_val = max(rms_frames)
+        peak_idx = np.argmax(rms_frames)
+        mean_energy = np.mean(rms_frames)
+        n_frames = len(rms_frames)
+        
+        # 💎 Dynamic Criterion 1: Energy Jump
+        if peak_val > (mean_energy * mult):
+            score += 0.20
+            
+            # 💎 Dynamic Criterion 2: Timing
+            if peak_idx > (n_frames * timing_gate):
+                score += 0.15
+            else:
+                print(f"      [Qalqalah Insight] {grade_name} burst detected at {peak_idx}/{n_frames} (too early).")
+        else:
+            print(f"      [Qalqalah Insight] {grade_name} failed {mult}x threshold (Ratio: {peak_val/mean_energy:.2f}).")
+            
+        return round(float(min(1.0, score)), 2)
+    else:
+        return 0.5
 
 
 def compute_ghunnah_score(user_features: dict, ref_features: dict) -> float:

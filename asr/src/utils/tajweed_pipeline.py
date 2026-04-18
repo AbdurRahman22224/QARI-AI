@@ -263,7 +263,7 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
     avg_ref_word_dur = ref_duration / max(len(expected_word_list), 1) if ref_duration > 0 else 0
     ratio = total_trimmed_duration / max(ref_duration, 0.01)
     
-    for wr in comparison["word_results"]:
+    for i, wr in enumerate(comparison["word_results"]):
         exp_word = wr["expected"]
         norm_exp = normalize_arabic(exp_word)
         # Try both original and normalized keys for tajweed map lookup
@@ -402,10 +402,11 @@ def process_audio_pipeline(wav_path, expected_word_list, tajweed_map, ref_durati
                 print(f"         heavy: Centroid={u_c:.0f} (UserAvg={r_c:.0f}), LowRatio={u_l:.3f} (UserAvg={r_l:.3f})", flush=True)
                 
             elif rule == "qalqalah":
-                score = compute_qalqalah_score(word_feats, ref_global)
+                is_terminal = (i == len(comparison["word_results"]) - 1)
+                score = compute_qalqalah_score(word_feats, ref_global, word_text=exp_word, is_terminal=is_terminal)
                 u_p = max(word_feats.get("rms_frames", [0]))
                 u_m = word_feats.get("rms_mean", 0)
-                print(f"         qalqalah: PeakEnergy={u_p:.4f}, MeanEnergy={u_m:.4f}", flush=True)
+                print(f"         qalqalah: PeakEnergy={u_p:.4f}, MeanEnergy={u_m:.4f}, terminal={is_terminal}", flush=True)
                 
             elif rule == "ghunnah":
                 score = compute_ghunnah_score(word_feats, ref_global)

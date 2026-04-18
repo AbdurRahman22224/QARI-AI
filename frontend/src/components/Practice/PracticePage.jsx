@@ -1705,7 +1705,6 @@ export default function PracticePage() {
                           return (
                             <span key={i}
                               className={`group relative px-2.5 py-1 rounded-xl text-xs font-bold cursor-default transition-all duration-200 hover:scale-[1.02] hover:shadow-sm ${bgColor}`}
-                              title={tooltip}
                             >
                               {w.expected}
                               <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[9px] px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
