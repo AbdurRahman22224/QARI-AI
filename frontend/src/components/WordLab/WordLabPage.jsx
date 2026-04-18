@@ -107,6 +107,8 @@ const getLevelFingerprint = (words) => {
   return Math.abs(hash).toString(36);
 };
 
+const WORDLAB_CACHE_VERSION = 'v1.1.6';
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function WordLabPage() {
   const [selectedLevel, setSelectedLevel] = useState(null);
@@ -122,18 +124,20 @@ export default function WordLabPage() {
     if (!level) return;
 
     const fingerprint = getLevelFingerprint(level.words);
-    const CACHE_KEY = `wordlab_${levelId}_autov1_${fingerprint}`;
+    const CACHE_KEY = `${WORDLAB_CACHE_VERSION}_wordlab_${levelId}_${fingerprint}`;
     const CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 
     // Try cache
     try {
       const cached = JSON.parse(localStorage.getItem(CACHE_KEY));
       if (cached && Date.now() - cached.ts < CACHE_TTL && cached.data?.length > 0) {
+        console.log(`[WordLab] 🧠 Cache Hit for ${levelId} (Key: ${CACHE_KEY})`);
         setResolvedWords(prev => ({ ...prev, [levelId]: cached.data }));
         return cached.data;
       }
     } catch (_) { }
 
+    console.log(`[WordLab] 🚀 Cache Miss/Stale - Fetching fresh for ${levelId} (Key: ${CACHE_KEY})`);
     setLoadingLevel(levelId);
 
     // Group refs by surah:ayah
@@ -168,8 +172,11 @@ export default function WordLabPage() {
         const wordOnlyIdx = wordOnly.findIndex(w => w.position === ref.position);
         const verseTajweedForWord = wordOnlyIdx >= 0 ? tajweedChunks[wordOnlyIdx] : null;
 
+        // Explicitly exclude audio_url from API to strictly follow "Our Method" (position-based)
+        const { audio_url: _, ...cleanApiWord } = apiWord;
+
         resolved.push({
-          ...apiWord,
+          ...cleanApiWord,
           id: ref.id,
           _surah: ref.surah,
           _ayah: ref.ayah,

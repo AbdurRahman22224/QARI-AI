@@ -606,8 +606,11 @@ export const splitVerseTajweedIntoWords = (html) => {
 
   if (current.trim()) result.push(current);
 
-  // Filter out end-of-ayah marker chunks (e.g. <span class=end>٢</span>)
-  return result.filter(chunk => !/<span[^>]*class=["']?end["']?[^>]*>/i.test(chunk));
+  // Filter out chunks that don't contain any actual Arabic base letters (e.g. just markers or end-of-ayah symbols)
+  return result.filter(chunk => {
+    const textOnly = chunk.replace(/<[^>]+>/g, '');
+    return /[\u0621-\u064A\u0671-\u06D5]/.test(textOnly);
+  });
 };
 
 export const getLastVowel = (text) => {
