@@ -292,7 +292,8 @@ async function getDashboardStats(qfUserId, filter = 'recent', userToken = null) 
           headers: {
             'Accept': 'application/json',
             'x-auth-token': userToken,
-            'x-client-id': auth_config.client_id
+            'x-client-id': auth_config.client_id,
+            'x-timezone': 'Asia/Kolkata'
           },
           timeout: 5000
         });

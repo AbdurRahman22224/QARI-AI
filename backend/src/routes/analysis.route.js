@@ -3,7 +3,7 @@ const axios = require('axios');
 const multer = require('multer');
 const FormData = require('form-data');
 const { ASR_SERVICE_URL } = require('../config/env');
-const { savePracticeSession, saveWordLabAttempt } = require('../services/db.service');
+const { savePracticeSession, saveWordLabAttempt, upsertUser } = require('../services/db.service');
 
 const router = express.Router();
 
@@ -46,12 +46,16 @@ router.post('/analyze', upload.single('audio'), async (req, res) => {
     res.json(response.data);
 
     // 🔥 Fire-and-forget: save to DB (doesn't block response)
-      if (req.userId && req.userId !== 'guest') {
-        savePracticeSession(req.userId, response.data, {
-          surah: parseInt(req.body.chapter_id) || 0,
-          ayah: parseInt(req.body.verse_id) || 0
-        }, req.file.buffer).catch(err => console.error('[DB] Async save failed:', err.message));
-      }
+    if (req.userId && req.userId !== 'guest') {
+      upsertUser(req.userId, req.userName, req.userEmail)
+        .then(() => {
+          return savePracticeSession(req.userId, response.data, {
+            surah: parseInt(req.body.chapter_id) || 0,
+            ayah: parseInt(req.body.verse_id) || 0
+          }, req.file.buffer);
+        })
+        .catch(err => console.error('[DB] Async save failed:', err.message));
+    }
   } catch (error) {
     console.error("[ASR] Error:", error.response?.data || error.message);
     if (error.code === 'ECONNREFUSED') {
@@ -118,13 +122,17 @@ router.post('/analyze-word-hybrid', upload.single('audio'), async (req, res) => 
 
     // 🔥 Fire-and-forget: save Word Lab attempt to DB
     if (req.userId && req.userId !== 'guest') {
-      saveWordLabAttempt(req.userId, response.data, {
-        word_text: req.body.word_text || '',
-        surah: parseInt(req.body.surah_number) || 0,
-        ayah: parseInt(req.body.ayah_number) || 0,
-        position: parseInt(req.body.word_position) || 0,
-        difficulty: req.body.difficulty || 'intermediate'
-      }).catch(err => console.error('[DB] Async word save failed:', err.message));
+      upsertUser(req.userId, req.userName, req.userEmail)
+        .then(() => {
+          return saveWordLabAttempt(req.userId, response.data, {
+            word_text: req.body.word_text || '',
+            surah: parseInt(req.body.surah_number) || 0,
+            ayah: parseInt(req.body.ayah_number) || 0,
+            position: parseInt(req.body.word_position) || 0,
+            difficulty: req.body.difficulty || 'intermediate'
+          });
+        })
+        .catch(err => console.error('[DB] Async word save failed:', err.message));
     }
   } catch (error) {
     if (error.code === 'ECONNABORTED') {
