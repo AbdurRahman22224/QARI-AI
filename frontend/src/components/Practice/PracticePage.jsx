@@ -221,6 +221,8 @@ export default function PracticePage() {
   const analysisResultRef = useRef(null);
   const [analysisError, setAnalysisError] = useState(null);
   const [difficultWords, setDifficultWords] = useState([]);
+  const [verseError, setVerseError] = useState(null);
+  const [retryTrigger, setRetryTrigger] = useState(0);
   const [wordDurations, setWordDurations] = useState({}); // 🕒 Anchor Durations map
 
   // Word Focus states
@@ -884,6 +886,8 @@ export default function PracticePage() {
 
   // Clear recording when Ayah/Chapter changes
   useEffect(() => {
+    setVerseData(null);
+    setVerseError(null);
     setRecordedBlob(null);
     setRecordedUrl(null);
     setIsPlayingRecording(false);
@@ -896,13 +900,21 @@ export default function PracticePage() {
   useEffect(() => {
     if (!selectedChapter) return;
     setIsLoading(true);
+    setVerseError(null);
 
     fetch(API.QURAN(`${QURAN_CONTENT_BASE}/verses/by_chapter/${selectedChapter}?language=en&words=true&translations=20&audio=${selectedReciter}&per_page=1&page=${selectedAyah}&fields=text_uthmani_tajweed,text_uthmani&word_fields=text_uthmani,text_uthmani_tajweed,audio_url,char_type_name,position&segments=true&foot_notes=true`))
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`Failed to fetch from Quran API (Status ${res.status})`);
+        }
+        return res.json();
+      })
       .then(data => {
-        if (data.verses && data.verses.length > 0) {
-          const rawWords = data.verses[0].words || [];
-          const sanitized = [];
+        if (!data.verses || data.verses.length === 0) {
+          throw new Error('No verses returned from the Quran API.');
+        }
+        const rawWords = data.verses[0].words || [];
+        const sanitized = [];
 
           rawWords.forEach((w, i) => {
             const stripTajweed = (html) => html ? html.replace(/<[^>]+>/g, "").trim() : "";
@@ -1044,17 +1056,19 @@ export default function PracticePage() {
               })
               .catch(err => console.error("Duration sync fetch failed:", err));
           }
-        }
 
         if (audioRef.current && !isAutoPlayEnabled) {
           audioRef.current.pause();
           setIsPlaying(false);
         }
       })
-      .catch(console.error)
+      .catch(err => {
+        console.error("Verse load failed:", err);
+        setVerseError(err.message || "Failed to load verse. Please try again.");
+      })
       .finally(() => setIsLoading(false));
 
-  }, [selectedChapter, selectedAyah, selectedReciter]);
+  }, [selectedChapter, selectedAyah, selectedReciter, retryTrigger]);
 
   const currentChapterNode = chapters.find(c => c.id === parseInt(selectedChapter));
   const totalAyahs = currentChapterNode?.verses_count || 1;
@@ -1468,6 +1482,18 @@ export default function PracticePage() {
             <div className="flex flex-col items-center justify-center space-y-4 w-full">
               <Loader2 className="animate-spin text-emerald-500" size={36} />
               <p className="text-emerald-600/70 font-medium text-sm">Fetching Divine Words...</p>
+            </div>
+          ) : verseError ? (
+            <div className="flex flex-col items-center justify-center space-y-3 w-full text-center py-6">
+              <span className="text-rose-500 text-3xl">⚠️</span>
+              <p className="text-rose-600 font-bold text-sm">Error Loading Verse</p>
+              <p className="text-slate-500 text-xs max-w-xs">{verseError}</p>
+              <button
+                onClick={() => setRetryTrigger(prev => prev + 1)}
+                className="mt-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+              >
+                Retry
+              </button>
             </div>
           ) : (
             <>

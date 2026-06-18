@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, LayoutDashboard, Mic, Power, ChevronRight, AlertCircle, Loader2, FlaskConical } from 'lucide-react';
+import { BookOpen, LayoutDashboard, Mic, Power, ChevronRight, AlertCircle, Loader2, FlaskConical, Home } from 'lucide-react';
+import LandingPage from './components/Landing/LandingPage';
 import LoginPage from './components/Auth/LoginPage';
 import PracticePage from './components/Practice/PracticePage';
 import WordLabPage from './components/WordLab/WordLabPage';
@@ -25,12 +26,12 @@ export default function App() {
   const [userProfile, setUserProfile] = useState(null);
   const [activeTab, setActiveTab] = useState(() => {
     const path = window.location.pathname.replace('/', '');
-    return ['practice', 'wordlab', 'dashboard'].includes(path) ? path : 'practice';
+    return ['practice', 'wordlab', 'dashboard', 'home'].includes(path) ? path : 'practice';
   });
   const [isProcessingCode, setIsProcessingCode] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
-  const isPracticeTab = ['practice', 'wordlab', 'dashboard'].includes(activeTab);
+  const isAppTab = ['practice', 'wordlab', 'dashboard', 'home'].includes(activeTab);
 
   const processedCode = React.useRef(false);
 
@@ -115,7 +116,7 @@ export default function App() {
     // Sync browser Back/Forward navigation with state
     const handlePopState = () => {
       const path = window.location.pathname.replace('/', '');
-      if (['practice', 'wordlab', 'dashboard'].includes(path)) {
+      if (['practice', 'wordlab', 'dashboard', 'home'].includes(path)) {
         setActiveTab(path);
       } else if (path === '') {
         setActiveTab('practice');
@@ -202,6 +203,25 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
+    // /login path → show login page directly; everything else → landing page
+    const isLoginRoute = window.location.pathname === '/login';
+    if (!isLoginRoute) {
+      return (
+        <LandingPage
+          onGetStarted={() => {
+            window.history.pushState(null, '', '/login');
+            // Force re-render so the login route check above triggers
+            setLoginError((prev) => prev);
+            // Use a micro state bump to force re-render
+            setIsProcessingCode(false);
+            window.location.pathname = '/login';
+          }}
+          onGuestLogin={() => {
+            handleMockLogin();
+          }}
+        />
+      );
+    }
     return (
       <>
         {loginError && (
@@ -216,39 +236,66 @@ export default function App() {
     );
   }
 
+  // When activeTab is 'home', render landing page full-screen (no sidebar)
+  if (activeTab === 'home') {
+    return (
+      <LandingPage
+        isAuthenticated={true}
+        onGetStarted={() => handleTabChange('practice')}
+        onGuestLogin={() => handleTabChange('practice')}
+        onBackToApp={() => handleTabChange('practice')}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex transition-all duration-300">
       {/* Expandable Sidebar */}
       <aside
-        className={`${isSidebarExpanded ? (isPracticeTab ? 'w-52' : 'w-64') : (isPracticeTab ? 'w-16' : 'w-20')} bg-white/70 backdrop-blur-3xl border-r border-gray-100 flex flex-col items-center ${isPracticeTab ? 'py-6' : 'py-8'} z-20 shadow-[8px_0_32px_-12px_rgba(0,0,0,0.08)] transition-all duration-500 ease-in-out relative group h-screen sticky top-0`}
+        className={`${isSidebarExpanded ? (isAppTab ? 'w-52' : 'w-64') : (isAppTab ? 'w-16' : 'w-20')} bg-white/70 backdrop-blur-3xl border-r border-gray-100 flex flex-col items-center ${isAppTab ? 'py-6' : 'py-8'} z-20 shadow-[8px_0_32px_-12px_rgba(0,0,0,0.08)] transition-all duration-500 ease-in-out relative group h-screen sticky top-0`}
         onMouseEnter={() => setIsSidebarExpanded(true)}
         onMouseLeave={() => setIsSidebarExpanded(false)}
       >
         {/* Toggle Indicator */}
-        <div className={`absolute ${isPracticeTab ? '-right-3.5 top-10 w-7 h-7' : '-right-4 top-12 w-8 h-8'} bg-white border border-gray-100 rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-gray-100 transition-all z-30`} onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}>
-          <ChevronRight className={`text-emerald-500 transition-transform duration-500 ${isSidebarExpanded ? 'rotate-180' : ''}`} size={isPracticeTab ? 14 : 16} />
+        <div className={`absolute ${isAppTab ? '-right-3.5 top-10 w-7 h-7' : '-right-4 top-12 w-8 h-8'} bg-white border border-gray-100 rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-gray-100 transition-all z-30`} onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}>
+          <ChevronRight className={`text-emerald-500 transition-transform duration-500 ${isSidebarExpanded ? 'rotate-180' : ''}`} size={isAppTab ? 14 : 16} />
         </div>
 
         {/* Logo Section */}
-        <div className={`flex items-center ${isPracticeTab ? 'gap-3 mb-5' : 'gap-4 mb-6'} w-full ${isSidebarExpanded ? (isPracticeTab ? 'px-4 justify-start' : 'px-6 justify-start') : 'justify-center'}`}>
-          <div className={`${isPracticeTab ? 'w-10 h-10 rounded-xl' : 'w-12 h-12 rounded-2xl'} bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-100 flex-shrink-0`}>
-            <BookOpen className="text-white" size={isPracticeTab ? '1.15rem' : '1.4rem'} />
+        <div className={`flex items-center ${isAppTab ? 'gap-3 mb-5' : 'gap-4 mb-6'} w-full ${isSidebarExpanded ? (isAppTab ? 'px-4 justify-start' : 'px-6 justify-start') : 'justify-center'}`}>
+          <div className={`${isAppTab ? 'w-10 h-10 rounded-xl' : 'w-12 h-12 rounded-2xl'} bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-100 flex-shrink-0`}>
+            <BookOpen className="text-white" size={isAppTab ? '1.15rem' : '1.4rem'} />
           </div>
           {isSidebarExpanded && (
-            <span className={`${isPracticeTab ? 'text-xs' : 'text-sm'} font-bold text-gray-650 animate-fade-in whitespace-nowrap`}>
+            <span className={`${isAppTab ? 'text-xs' : 'text-sm'} font-bold text-gray-650 animate-fade-in whitespace-nowrap`}>
               Qari AI
             </span>
           )}
         </div>
 
         {/* Navigation Items */}
-        <nav className={`flex flex-col ${isPracticeTab ? 'gap-2.5 px-2.5' : 'gap-3 px-3'} w-full flex-1 overflow-hidden`}>
+        <nav className={`flex flex-col ${isAppTab ? 'gap-2.5 px-2.5' : 'gap-3 px-3'} w-full flex-1 overflow-hidden`}>
+          {/* Home */}
+          <button
+            onClick={() => handleTabChange('home')}
+            className={`flex items-center ${isAppTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isAppTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isAppTab ? 'rounded-xl' : 'rounded-2xl'} transition-all duration-150 hover:translate-x-1 w-full group relative ${activeTab === 'home' ? 'bg-emerald-100 text-emerald-700 shadow-sm scale-[1.02]' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+          >
+            <Home className={`flex-shrink-0 transition-transform ${activeTab === 'home' ? 'scale-110 text-emerald-700' : 'group-hover:scale-110'}`} size={isAppTab ? '1.1rem' : '1.4rem'} />
+            {isSidebarExpanded && <span className={`${isAppTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Home</span>}
+            {!isSidebarExpanded && (
+              <span className="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                Home
+              </span>
+            )}
+          </button>
+
+          {/* Practice */}
           <button
             onClick={() => handleTabChange('practice')}
-            className={`flex items-center ${isPracticeTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isPracticeTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isPracticeTab ? 'rounded-xl' : 'rounded-2xl'} transition-all duration-150 hover:translate-x-1 w-full group relative ${activeTab === 'practice' ? 'bg-emerald-100 text-emerald-700 shadow-sm scale-[1.02]' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+            className={`flex items-center ${isAppTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isAppTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isAppTab ? 'rounded-xl' : 'rounded-2xl'} transition-all duration-150 hover:translate-x-1 w-full group relative ${activeTab === 'practice' ? 'bg-emerald-100 text-emerald-700 shadow-sm scale-[1.02]' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
           >
-            <Mic className={`flex-shrink-0 transition-transform ${activeTab === 'practice' ? 'scale-110 text-emerald-700' : 'group-hover:scale-110'}`} size={isPracticeTab ? '1.1rem' : '1.4rem'} />
-            {isSidebarExpanded && <span className={`${isPracticeTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Practice</span>}
+            <Mic className={`flex-shrink-0 transition-transform ${activeTab === 'practice' ? 'scale-110 text-emerald-700' : 'group-hover:scale-110'}`} size={isAppTab ? '1.1rem' : '1.4rem'} />
+            {isSidebarExpanded && <span className={`${isAppTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Practice</span>}
             {!isSidebarExpanded && (
               <span className="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
                 Practice
@@ -256,12 +303,13 @@ export default function App() {
             )}
           </button>
 
+          {/* Word Lab */}
           <button
             onClick={() => handleTabChange('wordlab')}
-            className={`flex items-center ${isPracticeTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isPracticeTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isPracticeTab ? 'rounded-xl' : 'rounded-2xl'} transition-all duration-150 hover:translate-x-1 w-full group relative ${activeTab === 'wordlab' ? 'bg-emerald-100 text-emerald-700 shadow-sm scale-[1.02]' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+            className={`flex items-center ${isAppTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isAppTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isAppTab ? 'rounded-xl' : 'rounded-2xl'} transition-all duration-150 hover:translate-x-1 w-full group relative ${activeTab === 'wordlab' ? 'bg-emerald-100 text-emerald-700 shadow-sm scale-[1.02]' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
           >
-            <FlaskConical className={`flex-shrink-0 transition-transform ${activeTab === 'wordlab' ? 'scale-110 text-emerald-700' : 'group-hover:scale-110'}`} size={isPracticeTab ? '1.1rem' : '1.4rem'} />
-            {isSidebarExpanded && <span className={`${isPracticeTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Word Lab</span>}
+            <FlaskConical className={`flex-shrink-0 transition-transform ${activeTab === 'wordlab' ? 'scale-110 text-emerald-700' : 'group-hover:scale-110'}`} size={isAppTab ? '1.1rem' : '1.4rem'} />
+            {isSidebarExpanded && <span className={`${isAppTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Word Lab</span>}
             {!isSidebarExpanded && (
               <span className="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
                 Word Lab
@@ -269,12 +317,13 @@ export default function App() {
             )}
           </button>
 
+          {/* Dashboard */}
           <button
             onClick={() => handleTabChange('dashboard')}
-            className={`flex items-center ${isPracticeTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isPracticeTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isPracticeTab ? 'rounded-xl' : 'rounded-2xl'} transition-all duration-150 hover:translate-x-1 w-full group relative ${activeTab === 'dashboard' ? 'bg-emerald-100 text-emerald-700 shadow-sm scale-[1.02]' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+            className={`flex items-center ${isAppTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isAppTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isAppTab ? 'rounded-xl' : 'rounded-2xl'} transition-all duration-150 hover:translate-x-1 w-full group relative ${activeTab === 'dashboard' ? 'bg-emerald-100 text-emerald-700 shadow-sm scale-[1.02]' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
           >
-            <LayoutDashboard className={`flex-shrink-0 transition-transform ${activeTab === 'dashboard' ? 'scale-110 text-emerald-700' : 'group-hover:scale-110'}`} size={isPracticeTab ? '1.1rem' : '1.4rem'} />
-            {isSidebarExpanded && <span className={`${isPracticeTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Dashboard</span>}
+            <LayoutDashboard className={`flex-shrink-0 transition-transform ${activeTab === 'dashboard' ? 'scale-110 text-emerald-700' : 'group-hover:scale-110'}`} size={isAppTab ? '1.1rem' : '1.4rem'} />
+            {isSidebarExpanded && <span className={`${isAppTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Dashboard</span>}
             {!isSidebarExpanded && (
               <span className="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
                 Dashboard
@@ -284,13 +333,13 @@ export default function App() {
         </nav>
 
         {/* Fixed Logout Button at Bottom */}
-        <div className={`w-full ${isPracticeTab ? 'px-2.5 pt-3' : 'px-3 pt-4'} mt-auto border-t border-gray-200`}>
+        <div className={`w-full ${isAppTab ? 'px-2.5 pt-3' : 'px-3 pt-4'} mt-auto border-t border-gray-200`}>
           <button
             onClick={handleLogout}
-            className={`flex items-center ${isPracticeTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isPracticeTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isPracticeTab ? 'rounded-xl' : 'rounded-2xl'} text-gray-500 hover:bg-red-50 hover:text-red-500 hover:translate-x-1 transition-all duration-150 w-full group relative`}
+            className={`flex items-center ${isAppTab ? 'gap-3 py-2.5' : 'gap-4 py-3.5'} ${isSidebarExpanded ? (isAppTab ? 'px-3 justify-start' : 'px-4 justify-start') : 'justify-center'} ${isAppTab ? 'rounded-xl' : 'rounded-2xl'} text-gray-500 hover:bg-red-50 hover:text-red-500 hover:translate-x-1 transition-all duration-150 w-full group relative`}
           >
-            <Power className="flex-shrink-0 transition-transform group-hover:scale-110" size={isPracticeTab ? '1.1rem' : '1.4rem'} />
-            {isSidebarExpanded && <span className={`${isPracticeTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Sign Out</span>}
+            <Power className="flex-shrink-0 transition-transform group-hover:scale-110" size={isAppTab ? '1.1rem' : '1.4rem'} />
+            {isSidebarExpanded && <span className={`${isAppTab ? 'text-xs' : 'text-sm'} font-bold tracking-wide animate-fade-in whitespace-nowrap`}>Sign Out</span>}
             {!isSidebarExpanded && (
               <span className="absolute left-full ml-4 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
                 Sign Out
@@ -302,24 +351,24 @@ export default function App() {
 
       <main className="flex-1 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-teal-50/30 via-slate-50 to-white overflow-y-auto relative flex flex-col transition-all duration-300">
         {/* Top Navigation Bar for Profile */}
-        <header className={`w-full ${isPracticeTab ? 'h-16 px-5' : 'h-20 px-8'} flex items-center justify-end z-10`}>
-          <div className={`flex items-center ${isPracticeTab ? 'gap-3 px-3 py-1.5' : 'gap-4 px-4 py-2'} bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/40 hover:shadow-md transition-shadow cursor-default group`}>
+        <header className={`w-full ${isAppTab ? 'h-16 px-5' : 'h-20 px-8'} flex items-center justify-end z-10`}>
+          <div className={`flex items-center ${isAppTab ? 'gap-3 px-3 py-1.5' : 'gap-4 px-4 py-2'} bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/40 hover:shadow-md transition-shadow cursor-default group`}>
             <div className="flex flex-col items-end">
-              <span className={`${isPracticeTab ? 'text-xs' : 'text-sm'} font-bold text-gray-800 leading-tight group-hover:text-emerald-600 transition-colors`}>
+              <span className={`${isAppTab ? 'text-xs' : 'text-sm'} font-bold text-gray-800 leading-tight group-hover:text-emerald-600 transition-colors`}>
                 {userProfile?.name || userProfile?.preferred_username || userProfile?.nickname || userProfile?.given_name || (userProfile?.email ? userProfile.email.split('@')[0] : "Student")}
               </span>
-              <span className={`${isPracticeTab ? 'text-[9px]' : 'text-[10px]'} font-bold text-gray-400 grayscale group-hover:grayscale-0 transition-all`}>
+              <span className={`${isAppTab ? 'text-[9px]' : 'text-[10px]'} font-bold text-gray-400 grayscale group-hover:grayscale-0 transition-all`}>
                 {userProfile?.email || "qari.ai"}
               </span>
             </div>
-            <div className={`${isPracticeTab ? 'w-8 h-8 text-sm' : 'w-10 h-10 text-lg'} bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-full flex items-center justify-center shadow-inner border-2 border-white text-white font-black`}>
+            <div className={`${isAppTab ? 'w-8 h-8 text-sm' : 'w-10 h-10 text-lg'} bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-full flex items-center justify-center shadow-inner border-2 border-white text-white font-black`}>
               {(userProfile?.name || userProfile?.preferred_username || userProfile?.nickname || userProfile?.given_name || userProfile?.email || "S").charAt(0).toUpperCase()}
             </div>
           </div>
         </header>
 
         {/* Main Content Area */}
-        <div className={`flex-1 ${isPracticeTab ? 'p-1.5' : 'p-2'}`}>
+        <div className={`flex-1 ${isAppTab ? 'p-1.5' : 'p-2'}`}>
           {activeTab === 'practice' ? <PracticePage /> : activeTab === 'wordlab' ? <WordLabPage /> : <DashboardPage userProfile={userProfile} />}
         </div>
       </main>
